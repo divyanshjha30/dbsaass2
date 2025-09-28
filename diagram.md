@@ -736,6 +736,319 @@ graph TD
 | 14        | Banking System Security Architecture      | Section C.2           | At beginning of banking case study                       |
 | 15        | AI/ML Enhanced Database Operations        | Section D.2           | When discussing AI/ML integration                        |
 | 16        | Next-Generation Database Architecture     | Section D.2           | At end when discussing future trends                     |
+| 17        | Performance Optimization Guidelines       | Section 9.2           | At beginning of performance optimization section         |
+| 18        | Multi-Layer Security Implementation       | Section 9.3           | At beginning of security best practices section          |
+| 19        | Performance Optimization Decision Tree    | Section 9.2           | After the performance checklist                          |
+| 20        | Database Security Audit Framework         | Section 9.3           | After discussing audit level controls                    |
+
+---
+
+## 9. Implementation Guidelines Diagrams
+
+### Diagram 17: Performance Optimization Guidelines (Section 9.2)
+
+**📍 WORD PLACEMENT:** Section 9.2 "Performance Optimization Guidelines" - Insert at the beginning of the section to show the complete optimization workflow
+
+```mermaid
+flowchart TD
+    A[Performance Issue Detected] --> B{Identify Bottleneck Type}
+
+    B -->|Query Performance| C[Query Analysis]
+    B -->|Storage Performance| D[Storage Analysis]
+    B -->|Concurrency Issues| E[Concurrency Analysis]
+    B -->|Resource Constraints| F[Resource Analysis]
+
+    C --> C1[Analyze Execution Plan]
+    C1 --> C2[Check Index Usage]
+    C2 --> C3[Optimize JOIN Order]
+    C3 --> C4[Consider Query Rewrite]
+
+    D --> D1[Review Table Partitioning]
+    D1 --> D2[Optimize Storage Parameters]
+    D2 --> D3[Implement Compression]
+    D3 --> D4[Tune Buffer Pool]
+
+    E --> E1[Analyze Lock Patterns]
+    E1 --> E2[Optimize Transaction Size]
+    E2 --> E3[Implement Connection Pooling]
+    E3 --> E4[Review Isolation Levels]
+
+    F --> F1[Monitor CPU/Memory Usage]
+    F1 --> F2[Scale Hardware Resources]
+    F2 --> F3[Implement Caching Strategy]
+    F3 --> F4[Load Balance Connections]
+
+    C4 --> G[Apply Optimization]
+    D4 --> G
+    E4 --> G
+    F4 --> G
+
+    G --> H[Monitor Performance]
+    H --> I{Performance Improved?}
+    I -->|Yes| J[Document Solution]
+    I -->|No| K[Escalate to DBA Team]
+    I -->|Partially| B
+
+    J --> L[Update Performance Baseline]
+    K --> M[Advanced Troubleshooting]
+
+    subgraph "Optimization Techniques"
+        N[Index Optimization]
+        O[Materialized Views]
+        P[Stored Procedures]
+        Q[Batch Processing]
+    end
+
+    subgraph "Monitoring Tools"
+        R[Execution Plans]
+        S[Performance Counters]
+        T[Query Statistics]
+        U[Resource Utilization]
+    end
+
+    style A fill:#ffebee
+    style G fill:#e8f5e8
+    style J fill:#e3f2fd
+    style K fill:#fff3e0
+```
+
+### Diagram 18: Multi-Layer Security Implementation (Section 9.3)
+
+**📍 WORD PLACEMENT:** Section 9.3 "Security Implementation Best Practices" - Insert at the beginning of the section to illustrate the comprehensive security architecture
+
+```mermaid
+graph TB
+    subgraph "Application Security Layer"
+        A1[User Authentication] --> A2[Session Management]
+        A2 --> A3[Input Validation]
+        A3 --> A4[SQL Injection Prevention]
+        A4 --> A5[Output Encoding]
+        A5 --> A6[Error Handling]
+    end
+
+    subgraph "Database Security Layer"
+        B1[User Account Management] --> B2[Role-Based Access Control]
+        B2 --> B3[Schema-Level Permissions]
+        B3 --> B4[Object-Level Security]
+        B4 --> B5[Row-Level Security]
+        B5 --> B6[Column-Level Encryption]
+    end
+
+    subgraph "Network Security Layer"
+        C1[SSL/TLS Encryption] --> C2[VPN Connectivity]
+        C2 --> C3[Firewall Rules]
+        C3 --> C4[Network Segmentation]
+        C4 --> C5[Intrusion Detection]
+        C5 --> C6[Traffic Monitoring]
+    end
+
+    subgraph "Audit and Compliance Layer"
+        D1[Activity Logging] --> D2[Access Monitoring]
+        D2 --> D3[Change Tracking]
+        D3 --> D4[Compliance Reporting]
+        D4 --> D5[Risk Assessment]
+        D5 --> D6[Incident Response]
+    end
+
+    subgraph "Data Protection Layer"
+        E1[Data Classification] --> E2[Encryption at Rest]
+        E2 --> E3[Backup Security]
+        E3 --> E4[Data Masking]
+        E4 --> E5[Key Management]
+        E5 --> E6[Data Retention]
+    end
+
+    A1 --> B1
+    B1 --> C1
+    C1 --> D1
+    D1 --> E1
+
+    A6 --> B6
+    B6 --> C6
+    C6 --> D6
+    D6 --> E6
+
+    subgraph "Security Controls Implementation"
+        F1[Preventive Controls] --> F2[Detective Controls]
+        F2 --> F3[Corrective Controls]
+        F3 --> F4[Administrative Controls]
+    end
+
+    subgraph "Compliance Frameworks"
+        G1[GDPR] --> G2[HIPAA]
+        G2 --> G3[PCI-DSS]
+        G3 --> G4[SOX]
+        G4 --> G5[ISO 27001]
+    end
+
+    E6 --> F1
+    F4 --> G1
+
+    style A1 fill:#ffcdd2
+    style B1 fill:#f8bbd9
+    style C1 fill:#e1bee7
+    style D1 fill:#d1c4e9
+    style E1 fill:#c5cae9
+    style F1 fill:#bbdefb
+    style G1 fill:#b3e5fc
+```
+
+### Diagram 19: Performance Optimization Decision Tree
+
+**📍 WORD PLACEMENT:** Section 9.2 "Performance Optimization Guidelines" - Insert after the checklist to show decision-making process
+
+```mermaid
+graph TD
+    START[Performance Issue Identified] --> MEASURE[Measure Current Performance]
+    MEASURE --> BASELINE{Establish Baseline Metrics}
+
+    BASELINE --> CPU_CHECK{CPU Usage > 80%?}
+    CPU_CHECK -->|Yes| CPU_OPT[Optimize CPU Usage]
+    CPU_CHECK -->|No| MEM_CHECK{Memory Usage > 85%?}
+
+    MEM_CHECK -->|Yes| MEM_OPT[Optimize Memory Usage]
+    MEM_CHECK -->|No| IO_CHECK{Disk I/O High?}
+
+    IO_CHECK -->|Yes| IO_OPT[Optimize Disk I/O]
+    IO_CHECK -->|No| QUERY_CHECK{Slow Queries Detected?}
+
+    QUERY_CHECK -->|Yes| QUERY_OPT[Query Optimization]
+    QUERY_CHECK -->|No| CONCURRENCY_CHECK{Lock Contention?}
+
+    CPU_OPT --> CPU_ACTIONS[• Optimize expensive queries<br/>• Add appropriate indexes<br/>• Use stored procedures<br/>• Implement caching]
+
+    MEM_OPT --> MEM_ACTIONS[• Increase buffer pool size<br/>• Optimize sort operations<br/>• Review connection pooling<br/>• Tune memory parameters]
+
+    IO_OPT --> IO_ACTIONS[• Add storage indexes<br/>• Implement partitioning<br/>• Optimize file placement<br/>• Use SSD storage]
+
+    QUERY_OPT --> QUERY_ACTIONS[• Analyze execution plans<br/>• Rewrite complex queries<br/>• Add covering indexes<br/>• Use materialized views]
+
+    CONCURRENCY_CHECK -->|Yes| CONCUR_OPT[Concurrency Optimization]
+    CONCURRENCY_CHECK -->|No| NET_CHECK{Network Latency High?}
+
+    CONCUR_OPT --> CONCUR_ACTIONS[• Reduce transaction time<br/>• Optimize lock granularity<br/>• Use read uncommitted<br/>• Implement row versioning]
+
+    NET_CHECK -->|Yes| NET_OPT[Network Optimization]
+    NET_CHECK -->|No| SCALE_CHECK{Need to Scale?}
+
+    NET_OPT --> NET_ACTIONS[• Implement connection pooling<br/>• Compress data transfer<br/>• Optimize batch sizes<br/>• Use local caching]
+
+    SCALE_CHECK -->|Vertical| SCALE_UP[Scale Up Resources]
+    SCALE_CHECK -->|Horizontal| SCALE_OUT[Scale Out Architecture]
+    SCALE_CHECK -->|No| MONITOR[Continuous Monitoring]
+
+    CPU_ACTIONS --> TEST[Test Performance Impact]
+    MEM_ACTIONS --> TEST
+    IO_ACTIONS --> TEST
+    QUERY_ACTIONS --> TEST
+    CONCUR_ACTIONS --> TEST
+    NET_ACTIONS --> TEST
+    SCALE_UP --> TEST
+    SCALE_OUT --> TEST
+
+    TEST --> IMPROVED{Performance Improved?}
+    IMPROVED -->|Yes| DOCUMENT[Document Solution & Update Baseline]
+    IMPROVED -->|No| ESCALATE[Escalate to Senior DBA]
+    IMPROVED -->|Partially| MEASURE
+
+    DOCUMENT --> MONITOR
+    ESCALATE --> ADVANCED[Advanced Diagnostics]
+    MONITOR --> ALERT{New Issues Detected?}
+    ALERT -->|Yes| START
+    ALERT -->|No| MONITOR
+
+    style START fill:#e3f2fd
+    style TEST fill:#fff3e0
+    style DOCUMENT fill:#e8f5e8
+    style ESCALATE fill:#ffebee
+    style MONITOR fill:#f3e5f5
+```
+
+### Diagram 20: Database Security Audit Framework
+
+**📍 WORD PLACEMENT:** Section 9.3 "Security Implementation Best Practices" - Insert after discussing audit level controls
+
+```mermaid
+graph TB
+    subgraph "Security Audit Planning"
+        A1[Risk Assessment] --> A2[Compliance Requirements]
+        A2 --> A3[Audit Scope Definition]
+        A3 --> A4[Resource Allocation]
+        A4 --> A5[Timeline Planning]
+    end
+
+    subgraph "Technical Security Audit"
+        B1[User Access Review] --> B2[Permission Analysis]
+        B2 --> B3[Authentication Testing]
+        B3 --> B4[Authorization Validation]
+        B4 --> B5[Encryption Verification]
+        B5 --> B6[Network Security Check]
+    end
+
+    subgraph "Compliance Audit"
+        C1[GDPR Compliance] --> C2[Data Classification Check]
+        C2 --> C3[Retention Policy Review]
+        C3 --> C4[Data Processing Audit]
+        C4 --> C5[Consent Management]
+        C5 --> C6[Right to be Forgotten]
+    end
+
+    subgraph "Operational Security Audit"
+        D1[Backup Security] --> D2[Recovery Testing]
+        D2 --> D3[Change Management]
+        D3 --> D4[Incident Response]
+        D4 --> D5[Security Training]
+        D5 --> D6[Vendor Management]
+    end
+
+    subgraph "Audit Tools & Techniques"
+        E1[Automated Scanning] --> E2[Penetration Testing]
+        E2 --> E3[Log Analysis]
+        E3 --> E4[Vulnerability Assessment]
+        E4 --> E5[Configuration Review]
+        E5 --> E6[Code Review]
+    end
+
+    A5 --> B1
+    B6 --> C1
+    C6 --> D1
+    D6 --> E1
+
+    E6 --> REPORT[Generate Audit Report]
+    REPORT --> FINDINGS[Document Findings]
+    FINDINGS --> PRIORITY[Prioritize Issues]
+
+    PRIORITY --> HIGH{High Risk Issues?}
+    HIGH -->|Yes| IMMEDIATE[Immediate Remediation]
+    HIGH -->|No| MEDIUM{Medium Risk Issues?}
+
+    MEDIUM -->|Yes| PLANNED[Planned Remediation]
+    MEDIUM -->|No| LOW{Low Risk Issues?}
+
+    LOW -->|Yes| FUTURE[Future Enhancement]
+    LOW -->|No| MONITOR_ONLY[Monitor Only]
+
+    IMMEDIATE --> VALIDATE[Validate Fixes]
+    PLANNED --> VALIDATE
+    FUTURE --> SCHEDULE[Schedule for Next Cycle]
+    MONITOR_ONLY --> SCHEDULE
+
+    VALIDATE --> RETEST[Re-test Security]
+    RETEST --> PASS{Remediation Successful?}
+    PASS -->|Yes| CLOSE[Close Finding]
+    PASS -->|No| ESCALATE[Escalate Issue]
+
+    CLOSE --> NEXT_AUDIT[Next Audit Cycle]
+    ESCALATE --> EXPERT[Security Expert Review]
+    SCHEDULE --> NEXT_AUDIT
+    EXPERT --> IMMEDIATE
+
+    style A1 fill:#ffebee
+    style REPORT fill:#e8f5e8
+    style IMMEDIATE fill:#ffcdd2
+    style CLOSE fill:#c8e6c9
+    style ESCALATE fill:#ffab91
+```
 
 ---
 
