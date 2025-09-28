@@ -2692,3 +2692,811 @@ Each example is marked with **📍 Location** indicating exactly where it should
 - **Easy copy-paste for future use**
 
 This approach will make your technical report look incredibly professional with properly formatted code examples! 🚀
+
+---
+
+### C.2 Banking System Case Study
+
+**📍 Location: SECTION C - C.2 Financial Services Banking System Case Study**
+
+#### Multi-Schema Security Implementation (VDL Focus)
+
+```sql
+-- Role-based access control through sophisticated views
+CREATE SCHEMA banking_secure;
+SET search_path TO banking_secure;
+
+-- Customer service representative view - limited PII access
+CREATE VIEW csr_customer_interface AS
+SELECT
+    c.customer_id,
+    CASE
+        WHEN CURRENT_USER IN (SELECT user_name FROM authorized_csr_users)
+        THEN c.first_name
+        ELSE '*'
+    END as first_name,
+    CASE
+        WHEN CURRENT_USER IN (SELECT user_name FROM authorized_csr_users)
+        THEN c.last_name
+        ELSE '*'
+    END as last_name,
+
+    -- Masked sensitive data
+    LEFT(c.email, 3) || '*@' || SPLIT_PART(c.email, '@', 2) as masked_email,
+    'XXX-XXX-' || RIGHT(c.phone, 4) as masked_phone,
+
+    -- Account summary (non-sensitive)
+    COUNT(a.account_id) as total_accounts,
+    SUM(CASE WHEN a.status = 'active' THEN 1 ELSE 0 END) as active_accounts,
+    c.customer_since,
+    c.status as customer_status,
+
+    -- Risk indicators
+    CASE
+        WHEN c.risk_score > 80 THEN 'HIGH'
+        WHEN c.risk_score > 50 THEN 'MEDIUM'
+        ELSE 'LOW'
+    END as risk_level,
+
+    -- Recent activity flags
+    (SELECT COUNT(*) FROM transactions t
+     INNER JOIN accounts acc ON t.account_id = acc.account_id
+     WHERE acc.customer_id = c.customer_id
+       AND t.transaction_date >= CURRENT_DATE - INTERVAL '24 hours'
+       AND t.suspicious_activity_flag = true
+    ) as recent_suspicious_transactions
+
+FROM customers c
+LEFT JOIN accounts a ON c.customer_id = a.customer_id
+WHERE c.status IN ('active', 'restricted')
+GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.phone,
+         c.customer_since, c.status, c.risk_score
+WITH CHECK OPTION;
+
+-- Compliance officer view - full audit trail access
+CREATE VIEW compliance_audit_trail AS
+SELECT
+    t.transaction_id,
+    t.account_id,
+    a.account_number,
+    c.customer_id,
+    -- Full customer details for compliance
+    c.first_name,
+    c.last_name,
+    c.ssn_hash,
+
+    -- Transaction details
+    t.transaction_date,
+    t.transaction_type,
+    t.amount,
+    t.description,
+    t.source_account,
+    t.destination_account,
+
+    -- Risk and compliance flags
+    t.suspicious_activity_flag,
+    t.large_cash_transaction_flag,
+    t.cross_border_flag,
+    t.aml_risk_score,
+
+    -- Regulatory reporting fields
+    CASE
+        WHEN t.amount >= 10000 THEN 'CTR_REQUIRED'  -- Currency Transaction Report
+        WHEN t.suspicious_activity_flag THEN 'SAR_REQUIRED'  -- Suspicious Activity Report
+        WHEN t.cross_border_flag AND t.amount >= 3000 THEN 'FBAR_RELEVANT'
+        ELSE 'STANDARD'
+    END as regulatory_status,
+
+    -- Audit metadata
+    t.created_by,
+    t.created_at,
+    t.last_modified_by,
+    t.last_modified_at,
+
+    -- Risk scoring
+    CASE
+        WHEN t.aml_risk_score >= 90 THEN 'CRITICAL'
+        WHEN t.aml_risk_score >= 70 THEN 'HIGH'
+        WHEN t.aml_risk_score >= 40 THEN 'MEDIUM'
+        ELSE 'LOW'
+    END as aml_risk_level
+
+FROM transactions t
+INNER JOIN accounts a ON t.account_id = a.account_id
+INNER JOIN customers c ON a.customer_id = c.customer_id
+WHERE CURRENT_USER IN (SELECT user_name FROM compliance_officers)
+WITH CHECK OPTION;
+```
+
+#### Basel III Compliance Reporting
+
+```sql
+-- Regulatory capital adequacy reporting with real-time risk calculations
+CREATE VIEW basel_iii_capital_adequacy AS
+WITH risk_weighted_assets AS (
+    SELECT
+        l.loan_id,
+        l.principal_amount,
+        l.outstanding_balance,
+        l.loan_type,
+        c.credit_rating,
+        l.collateral_value,
+
+        -- Risk weight assignments per Basel III
+        CASE l.loan_type
+            WHEN 'sovereign' THEN 0.00
+            WHEN 'bank' THEN 0.20
+            WHEN 'corporate' THEN
+                CASE c.credit_rating
+                    WHEN 'AAA' THEN 0.20
+                    WHEN 'AA' THEN 0.20
+                    WHEN 'A' THEN 0.50
+                    WHEN 'BBB' THEN 1.00
+                    ELSE 1.50
+                END
+            WHEN 'retail_mortgage' THEN 0.35
+            WHEN 'retail_revolving' THEN 0.75
+            WHEN 'retail_other' THEN 0.75
+            ELSE 1.25
+        END as risk_weight,
+
+        -- Loan-to-value ratio for mortgages
+        CASE
+            WHEN l.loan_type = 'retail_mortgage' AND l.collateral_value > 0
+            THEN l.outstanding_balance / l.collateral_value
+            ELSE 0
+        END as ltv_ratio
+
+    FROM loans l
+    INNER JOIN customers c ON l.customer_id = c.customer_id
+    WHERE l.status IN ('active', 'current')
+),
+capital_components AS (
+    SELECT
+        -- Tier 1 Capital Components
+        SUM(CASE WHEN c.capital_type = 'common_equity_tier1' THEN c.amount ELSE 0 END) as cet1_capital,
+        SUM(CASE WHEN c.capital_type IN ('common_equity_tier1', 'additional_tier1')
+                 THEN c.amount ELSE 0 END) as tier1_capital,
+
+        -- Total Capital (Tier 1 + Tier 2)
+        SUM(c.amount) as total_capital,
+
+        -- Risk-weighted assets calculation
+        (SELECT SUM(outstanding_balance * risk_weight)
+         FROM risk_weighted_assets) as total_rwa
+
+    FROM bank_capital c
+    WHERE c.reporting_date = CURRENT_DATE
+      AND c.is_active = true
+),
+liquidity_metrics AS (
+    SELECT
+        -- Liquidity Coverage Ratio components
+        SUM(CASE WHEN a.liquidity_class = 'level1_hqla' THEN a.market_value
+                 WHEN a.liquidity_class = 'level2a_hqla' THEN a.market_value * 0.85
+                 WHEN a.liquidity_class = 'level2b_hqla' THEN a.market_value * 0.50
+                 ELSE 0 END) as high_quality_liquid_assets,
+
+        -- Net cash outflows (30-day stress scenario)
+        SUM(CASE WHEN cf.scenario = 'stress_30day' AND cf.direction = 'outflow'
+                 THEN cf.amount ELSE 0 END) -
+        SUM(CASE WHEN cf.scenario = 'stress_30day' AND cf.direction = 'inflow'
+                 THEN cf.amount * 0.75 ELSE 0 END) as net_cash_outflows
+
+    FROM liquid_assets a
+    CROSS JOIN cash_flow_projections cf
+    WHERE a.valuation_date = CURRENT_DATE
+      AND cf.projection_date = CURRENT_DATE
+)
+SELECT
+    -- Capital Adequacy Ratios
+    ROUND((cc.cet1_capital / cc.total_rwa) * 100, 2) as cet1_ratio,
+    ROUND((cc.tier1_capital / cc.total_rwa) * 100, 2) as tier1_ratio,
+    ROUND((cc.total_capital / cc.total_rwa) * 100, 2) as total_capital_ratio,
+
+    -- Regulatory minimum requirements
+    4.5 as cet1_minimum,
+    6.0 as tier1_minimum,
+    8.0 as total_capital_minimum,
+
+    -- Excess/Deficit calculations
+    ROUND(((cc.cet1_capital / cc.total_rwa) - 0.045) * 100, 2) as cet1_excess,
+    ROUND(((cc.tier1_capital / cc.total_rwa) - 0.06) * 100, 2) as tier1_excess,
+    ROUND(((cc.total_capital / cc.total_rwa) - 0.08) * 100, 2) as total_capital_excess,
+
+    -- Liquidity ratios
+    ROUND((lm.high_quality_liquid_assets / NULLIF(lm.net_cash_outflows, 0)) * 100, 2) as lcr_ratio,
+    100.0 as lcr_minimum,
+
+    -- Additional metrics
+    cc.total_rwa / 1000000 as rwa_millions,
+    cc.total_capital / 1000000 as capital_millions,
+
+    -- Compliance status
+    CASE
+        WHEN (cc.cet1_capital / cc.total_rwa) >= 0.045
+         AND (cc.tier1_capital / cc.total_rwa) >= 0.06
+         AND (cc.total_capital / cc.total_rwa) >= 0.08
+         AND (lm.high_quality_liquid_assets / NULLIF(lm.net_cash_outflows, 0)) >= 1.0
+        THEN 'COMPLIANT'
+        ELSE 'NON_COMPLIANT'
+    END as overall_compliance_status,
+
+    CURRENT_DATE as reporting_date
+
+FROM capital_components cc
+CROSS JOIN liquidity_metrics lm;
+```
+
+### C.3 Healthcare System Case Study
+
+**📍 Location: SECTION C - C.3 Healthcare Information System Case Study**
+
+#### HIPAA-Compliant Data Access (Advanced VDL)
+
+```sql
+-- Patient data access with comprehensive privacy controls
+CREATE SCHEMA healthcare_secure;
+SET search_path TO healthcare_secure;
+
+-- Physician view - treatment-focused access
+CREATE VIEW physician_patient_care AS
+SELECT
+    p.patient_id,
+    p.medical_record_number,
+
+    -- Patient demographics (limited based on treatment relationship)
+    CASE
+        WHEN EXISTS (
+            SELECT 1 FROM physician_patient_assignments ppa
+            WHERE ppa.patient_id = p.patient_id
+              AND ppa.physician_id = get_current_physician_id()
+              AND ppa.status = 'active'
+        ) THEN p.first_name
+        ELSE 'RESTRICTED'
+    END as first_name,
+
+    CASE
+        WHEN EXISTS (
+            SELECT 1 FROM physician_patient_assignments ppa
+            WHERE ppa.patient_id = p.patient_id
+              AND ppa.physician_id = get_current_physician_id()
+              AND ppa.status = 'active'
+        ) THEN p.last_name
+        ELSE 'RESTRICTED'
+    END as last_name,
+
+    p.date_of_birth,
+    p.gender,
+    p.blood_type,
+
+    -- Clinical information
+    p.allergies,
+    p.chronic_conditions,
+    p.current_medications,
+    p.emergency_contact,
+
+    -- Recent encounters
+    (SELECT json_agg(json_build_object(
+        'encounter_id', e.encounter_id,
+        'encounter_date', e.encounter_date,
+        'encounter_type', e.encounter_type,
+        'chief_complaint', e.chief_complaint,
+        'diagnosis_codes', e.diagnosis_codes,
+        'treatment_notes', CASE
+            WHEN e.attending_physician_id = get_current_physician_id()
+            THEN e.treatment_notes
+            ELSE 'Access restricted to attending physician'
+        END
+    ) ORDER BY e.encounter_date DESC)
+     FROM patient_encounters e
+     WHERE e.patient_id = p.patient_id
+       AND e.encounter_date >= CURRENT_DATE - INTERVAL '1 year'
+     LIMIT 20
+    ) as recent_encounters,
+
+    -- Lab results (time-restricted)
+    (SELECT json_agg(json_build_object(
+        'test_date', lr.test_date,
+        'test_type', lr.test_type,
+        'result_value', lr.result_value,
+        'reference_range', lr.reference_range,
+        'abnormal_flag', lr.abnormal_flag
+    ) ORDER BY lr.test_date DESC)
+     FROM lab_results lr
+     WHERE lr.patient_id = p.patient_id
+       AND lr.test_date >= CURRENT_DATE - INTERVAL '2 years'
+       AND lr.result_status = 'final'
+    ) as lab_results,
+
+    -- Medication history
+    (SELECT json_agg(json_build_object(
+        'medication_name', m.medication_name,
+        'dosage', m.dosage,
+        'frequency', m.frequency,
+        'start_date', m.start_date,
+        'end_date', m.end_date,
+        'prescribing_physician', ph.first_name || ' ' || ph.last_name
+    ) ORDER BY m.start_date DESC)
+     FROM patient_medications m
+     INNER JOIN physicians ph ON m.prescribing_physician_id = ph.physician_id
+     WHERE m.patient_id = p.patient_id
+       AND (m.end_date IS NULL OR m.end_date >= CURRENT_DATE - INTERVAL '1 year')
+    ) as medication_history
+
+FROM patients p
+WHERE p.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM physician_patient_assignments ppa
+      WHERE ppa.patient_id = p.patient_id
+        AND ppa.physician_id = get_current_physician_id()
+        AND ppa.status = 'active'
+  )
+WITH CHECK OPTION;
+
+-- Administrative view - operational metrics only
+CREATE VIEW admin_patient_summary AS
+SELECT
+    p.patient_id,
+    -- Masked identifiers
+    'MRN-' || RIGHT(p.medical_record_number, 4) as masked_mrn,
+
+    -- Demographics (anonymized)
+    EXTRACT(YEAR FROM AGE(p.date_of_birth)) as age_years,
+    p.gender,
+    p.zip_code,
+
+    -- Operational metrics
+    COUNT(pe.encounter_id) as total_encounters,
+    COUNT(CASE WHEN pe.encounter_date >= CURRENT_DATE - INTERVAL '1 year'
+               THEN 1 END) as encounters_last_year,
+
+    -- Financial metrics
+    COALESCE(SUM(b.total_charges), 0) as total_charges,
+    COALESCE(SUM(b.insurance_payments), 0) as insurance_payments,
+    COALESCE(SUM(b.patient_payments), 0) as patient_payments,
+    COALESCE(SUM(b.outstanding_balance), 0) as outstanding_balance,
+
+    -- Clinical indicators (aggregated)
+    COUNT(DISTINCT lr.test_type) as unique_lab_tests,
+    COUNT(DISTINCT pm.medication_name) as unique_medications,
+
+    -- Risk indicators
+    CASE
+        WHEN COUNT(pe.encounter_id) > 20 THEN 'HIGH_UTILIZER'
+        WHEN COUNT(pe.encounter_id) > 10 THEN 'MODERATE_UTILIZER'
+        ELSE 'LOW_UTILIZER'
+    END as utilization_category,
+
+    -- Recent activity
+    MAX(pe.encounter_date) as last_encounter_date,
+    COUNT(CASE WHEN pe.encounter_type = 'emergency' THEN 1 END) as emergency_visits
+
+FROM patients p
+LEFT JOIN patient_encounters pe ON p.patient_id = pe.patient_id
+    AND pe.encounter_date >= CURRENT_DATE - INTERVAL '2 years'
+LEFT JOIN billing b ON pe.encounter_id = b.encounter_id
+LEFT JOIN lab_results lr ON p.patient_id = lr.patient_id
+    AND lr.test_date >= CURRENT_DATE - INTERVAL '1 year'
+LEFT JOIN patient_medications pm ON p.patient_id = pm.patient_id
+    AND (pm.end_date IS NULL OR pm.end_date >= CURRENT_DATE - INTERVAL '1 year')
+WHERE p.status = 'active'
+GROUP BY p.patient_id, p.medical_record_number, p.date_of_birth, p.gender, p.zip_code
+WITH CHECK OPTION;
+```
+
+#### Clinical Decision Support System
+
+```sql
+-- Advanced clinical decision support with drug interaction checking
+CREATE OR REPLACE FUNCTION clinical_decision_support(
+    p_patient_id BIGINT,
+    p_proposed_medications JSON,
+    p_proposed_procedures JSON DEFAULT '[]'
+) RETURNS JSON AS $$
+DECLARE
+    v_patient_profile RECORD;
+    v_current_medications JSON;
+    v_allergies TEXT[];
+    v_chronic_conditions TEXT[];
+    v_recent_labs JSON;
+
+    v_drug_interactions JSON := '[]';
+    v_allergy_alerts JSON := '[]';
+    v_contraindication_alerts JSON := '[]';
+    v_dosage_alerts JSON := '[]';
+    v_monitoring_recommendations JSON := '[]';
+
+    v_risk_score INTEGER := 0;
+    v_recommendations JSON := '[]';
+    proposed_med JSON;
+    current_med JSON;
+
+BEGIN
+    -- Get patient profile
+    SELECT
+        p.patient_id,
+        p.date_of_birth,
+        p.gender,
+        p.weight_kg,
+        p.height_cm,
+        EXTRACT(YEAR FROM AGE(p.date_of_birth)) as age_years,
+        p.allergies,
+        p.chronic_conditions,
+
+        -- Calculate BMI
+        ROUND(p.weight_kg / POWER(p.height_cm / 100.0, 2), 1) as bmi,
+
+        -- Kidney function (latest creatinine)
+        (SELECT lr.result_value::DECIMAL
+         FROM lab_results lr
+         WHERE lr.patient_id = p.patient_id
+           AND lr.test_type = 'creatinine'
+           AND lr.result_status = 'final'
+         ORDER BY lr.test_date DESC
+         LIMIT 1) as latest_creatinine
+
+    INTO v_patient_profile
+    FROM patients p
+    WHERE p.patient_id = p_patient_id;
+
+    -- Get current medications
+    SELECT json_agg(json_build_object(
+        'medication_name', pm.medication_name,
+        'dosage', pm.dosage,
+        'frequency', pm.frequency,
+        'route', pm.route,
+        'drug_class', d.drug_class,
+        'active_ingredients', d.active_ingredients
+    )) INTO v_current_medications
+    FROM patient_medications pm
+    INNER JOIN drug_reference d ON pm.medication_name = d.drug_name
+    WHERE pm.patient_id = p_patient_id
+      AND (pm.end_date IS NULL OR pm.end_date >= CURRENT_DATE);
+
+    -- Parse allergies
+    v_allergies := string_to_array(v_patient_profile.allergies, ',');
+    v_chronic_conditions := string_to_array(v_patient_profile.chronic_conditions, ',');
+
+    -- Check each proposed medication
+    FOR proposed_med IN SELECT * FROM json_array_elements(p_proposed_medications)
+    LOOP
+        -- 1. ALLERGY CHECKING
+        IF EXISTS (
+            SELECT 1 FROM unnest(v_allergies) allergy
+            WHERE LOWER(allergy) LIKE '%' || LOWER(proposed_med->>'medication_name') || '%'
+               OR LOWER(allergy) LIKE '%' || LOWER(proposed_med->>'drug_class') || '%'
+        ) THEN
+            v_allergy_alerts := v_allergy_alerts || json_build_object(
+                'medication', proposed_med->>'medication_name',
+                'alert_type', 'ALLERGY_WARNING',
+                'severity', 'CRITICAL',
+                'message', 'Patient has documented allergy to this medication or drug class',
+                'known_allergies', v_allergies
+            );
+            v_risk_score := v_risk_score + 50;
+        END IF;
+
+        -- 2. DRUG-DRUG INTERACTIONS
+        FOR current_med IN SELECT * FROM json_array_elements(v_current_medications)
+        LOOP
+            -- Check interaction database
+            IF EXISTS (
+                SELECT 1 FROM drug_interactions di
+                WHERE (di.drug_a = (proposed_med->>'medication_name')
+                       AND di.drug_b = (current_med->>'medication_name'))
+                   OR (di.drug_b = (proposed_med->>'medication_name')
+                       AND di.drug_a = (current_med->>'medication_name'))
+            ) THEN
+                SELECT
+                    json_build_object(
+                        'proposed_medication', proposed_med->>'medication_name',
+                        'interacting_medication', current_med->>'medication_name',
+                        'interaction_severity', di.severity,
+                        'clinical_effect', di.clinical_effect,
+                        'management_strategy', di.management_strategy,
+                        'monitor_parameters', di.monitor_parameters
+                    )
+                INTO v_drug_interactions
+                FROM drug_interactions di
+                WHERE (di.drug_a = (proposed_med->>'medication_name')
+                       AND di.drug_b = (current_med->>'medication_name'))
+                   OR (di.drug_b = (proposed_med->>'medication_name')
+                       AND di.drug_a = (current_med->>'medication_name'))
+                LIMIT 1;
+
+                v_risk_score := v_risk_score +
+                    CASE
+                        WHEN (v_drug_interactions->>'interaction_severity') = 'major' THEN 40
+                        WHEN (v_drug_interactions->>'interaction_severity') = 'moderate' THEN 20
+                        ELSE 10
+                    END;
+            END IF;
+        END LOOP;
+
+        -- 3. CONTRAINDICATIONS based on conditions
+        IF EXISTS (
+            SELECT 1 FROM drug_contraindications dc
+            WHERE dc.drug_name = (proposed_med->>'medication_name')
+              AND dc.contraindication_condition = ANY(v_chronic_conditions)
+        ) THEN
+            v_contraindication_alerts := v_contraindication_alerts || json_build_object(
+                'medication', proposed_med->>'medication_name',
+                'contraindicated_condition',
+                    (SELECT dc.contraindication_condition
+                     FROM drug_contraindications dc
+                     WHERE dc.drug_name = (proposed_med->>'medication_name')
+                       AND dc.contraindication_condition = ANY(v_chronic_conditions)
+                     LIMIT 1),
+                'severity', 'HIGH',
+                'clinical_rationale',
+                    (SELECT dc.clinical_rationale
+                     FROM drug_contraindications dc
+                     WHERE dc.drug_name = (proposed_med->>'medication_name')
+                       AND dc.contraindication_condition = ANY(v_chronic_conditions)
+                     LIMIT 1)
+            );
+            v_risk_score := v_risk_score + 35;
+        END IF;
+
+        -- 4. DOSAGE APPROPRIATENESS
+        -- Age-based dosing
+        IF v_patient_profile.age_years >= 65 THEN
+            IF EXISTS (
+                SELECT 1 FROM geriatric_dosing_guidelines gdg
+                WHERE gdg.drug_name = (proposed_med->>'medication_name')
+                  AND (proposed_med->>'dosage')::DECIMAL > gdg.max_daily_dose_elderly
+            ) THEN
+                v_dosage_alerts := v_dosage_alerts || json_build_object(
+                    'medication', proposed_med->>'medication_name',
+                    'alert_type', 'GERIATRIC_DOSING',
+                    'proposed_dose', proposed_med->>'dosage',
+                    'recommended_max',
+                        (SELECT gdg.max_daily_dose_elderly
+                         FROM geriatric_dosing_guidelines gdg
+                         WHERE gdg.drug_name = (proposed_med->>'medication_name')),
+                    'rationale', 'Elderly patients require dose reduction'
+                );
+                v_risk_score := v_risk_score + 25;
+            END IF;
+        END IF;
+
+        -- Renal dosing adjustments
+        IF v_patient_profile.latest_creatinine > 1.5 THEN
+            IF EXISTS (
+                SELECT 1 FROM renal_dosing_guidelines rdg
+                WHERE rdg.drug_name = (proposed_med->>'medication_name')
+                  AND rdg.requires_adjustment = true
+            ) THEN
+                v_dosage_alerts := v_dosage_alerts || json_build_object(
+                    'medication', proposed_med->>'medication_name',
+                    'alert_type', 'RENAL_DOSING',
+                    'current_creatinine', v_patient_profile.latest_creatinine,
+                    'adjustment_required', true,
+                    'recommendation',
+                        (SELECT rdg.dosing_recommendation
+                         FROM renal_dosing_guidelines rdg
+                         WHERE rdg.drug_name = (proposed_med->>'medication_name'))
+                );
+                v_risk_score := v_risk_score + 20;
+            END IF;
+        END IF;
+
+        -- 5. MONITORING RECOMMENDATIONS
+        IF EXISTS (
+            SELECT 1 FROM drug_monitoring_requirements dmr
+            WHERE dmr.drug_name = (proposed_med->>'medication_name')
+        ) THEN
+            v_monitoring_recommendations := v_monitoring_recommendations || json_build_object(
+                'medication', proposed_med->>'medication_name',
+                'required_labs',
+                    (SELECT dmr.required_lab_tests
+                     FROM drug_monitoring_requirements dmr
+                     WHERE dmr.drug_name = (proposed_med->>'medication_name')),
+                'monitoring_frequency',
+                    (SELECT dmr.monitoring_frequency
+                     FROM drug_monitoring_requirements dmr
+                     WHERE dmr.drug_name = (proposed_med->>'medication_name')),
+                'clinical_parameters',
+                    (SELECT dmr.clinical_parameters
+                     FROM drug_monitoring_requirements dmr
+                     WHERE dmr.drug_name = (proposed_med->>'medication_name'))
+            );
+        END IF;
+
+    END LOOP;
+
+    -- Generate overall recommendations
+    IF v_risk_score >= 100 THEN
+        v_recommendations := v_recommendations || json_build_object(
+            'overall_recommendation', 'DO_NOT_PRESCRIBE',
+            'rationale', 'Critical safety concerns identified'
+        );
+    ELSIF v_risk_score >= 50 THEN
+        v_recommendations := v_recommendations || json_build_object(
+            'overall_recommendation', 'PRESCRIBE_WITH_CAUTION',
+            'rationale', 'Significant risks identified - close monitoring required'
+        );
+    ELSE
+        v_recommendations := v_recommendations || json_build_object(
+            'overall_recommendation', 'SAFE_TO_PRESCRIBE',
+            'rationale', 'No major safety concerns identified'
+        );
+    END IF;
+
+    -- Log the decision support query
+    INSERT INTO clinical_decision_log (
+        patient_id,
+        physician_id,
+        proposed_medications,
+        risk_score,
+        alerts_generated,
+        recommendations,
+        query_timestamp
+    ) VALUES (
+        p_patient_id,
+        get_current_physician_id(),
+        p_proposed_medications,
+        v_risk_score,
+        json_build_object(
+            'drug_interactions', v_drug_interactions,
+            'allergy_alerts', v_allergy_alerts,
+            'contraindication_alerts', v_contraindication_alerts,
+            'dosage_alerts', v_dosage_alerts
+        ),
+        v_recommendations,
+        NOW()
+    );
+
+    -- Return comprehensive analysis
+    RETURN json_build_object(
+        'patient_id', p_patient_id,
+        'analysis_timestamp', NOW(),
+        'risk_score', v_risk_score,
+        'safety_assessment',
+            CASE
+                WHEN v_risk_score >= 100 THEN 'HIGH_RISK'
+                WHEN v_risk_score >= 50 THEN 'MODERATE_RISK'
+                WHEN v_risk_score >= 25 THEN 'LOW_RISK'
+                ELSE 'MINIMAL_RISK'
+            END,
+        'alerts', json_build_object(
+            'drug_interactions', v_drug_interactions,
+            'allergy_alerts', v_allergy_alerts,
+            'contraindication_alerts', v_contraindication_alerts,
+            'dosage_alerts', v_dosage_alerts
+        ),
+        'monitoring_recommendations', v_monitoring_recommendations,
+        'clinical_recommendations', v_recommendations,
+        'patient_context', json_build_object(
+            'age', v_patient_profile.age_years,
+            'chronic_conditions', v_chronic_conditions,
+            'current_medications_count', json_array_length(v_current_medications),
+            'latest_creatinine', v_patient_profile.latest_creatinine
+        )
+    );
+
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+---
+
+## 5. SECTION D - CHALLENGES AND SOLUTIONS
+
+### D.1 Performance Optimization Challenges
+
+**📍 Location: SECTION D - D.1 Current Industry Challenges - Performance Optimization**
+
+#### Advanced Query Optimization Techniques
+
+```sql
+-- Using query hints for complex analytical queries
+SELECT /*+ USE_HASH(c,o) PARALLEL(4) */
+    c.customer_segment,
+    COUNT(DISTINCT c.customer_id) as unique_customers,
+    SUM(o.total_amount) as total_revenue,
+    AVG(o.total_amount) as avg_order_value,
+
+    -- Advanced window functions for ranking
+    ROW_NUMBER() OVER (ORDER BY SUM(o.total_amount) DESC) as revenue_rank,
+    PERCENT_RANK() OVER (ORDER BY SUM(o.total_amount)) as revenue_percentile,
+
+    -- Year-over-year comparison
+    LAG(SUM(o.total_amount), 1) OVER (
+        PARTITION BY c.customer_segment
+        ORDER BY EXTRACT(YEAR FROM o.order_date)
+    ) as previous_year_revenue
+
+FROM customers c
+INNER JOIN orders o ON c.customer_id = o.customer_id
+WHERE o.order_date >= ADD_MONTHS(SYSDATE, -24)  -- Last 2 years
+GROUP BY c.customer_segment, EXTRACT(YEAR FROM o.order_date)
+ORDER BY total_revenue DESC;
+```
+
+### B.3 Three-Schema Architecture Integration
+
+**📍 Location: SECTION B - B.3 Three-Schema Architecture Mapping**
+
+#### Complete SDL/DDL/DML/VDL Integration Example
+
+```sql
+-- EXTERNAL SCHEMA (User Views) - What users see
+CREATE VIEW sales_dashboard AS
+SELECT
+    'Q' || EXTRACT(QUARTER FROM order_date) || '-' || EXTRACT(YEAR FROM order_date) as quarter,
+    product_category,
+    SUM(total_amount) as quarterly_revenue,
+    COUNT(*) as total_orders,
+    AVG(total_amount) as avg_order_value
+FROM orders o
+INNER JOIN products p ON o.product_id = p.product_id
+WHERE order_date >= CURRENT_DATE - INTERVAL '2 years'
+GROUP BY EXTRACT(QUARTER FROM order_date), EXTRACT(YEAR FROM order_date), product_category;
+
+-- CONCEPTUAL SCHEMA (Logical Design) - Business rules and relationships
+CREATE TABLE order_management_logical (
+    order_id BIGINT PRIMARY KEY,
+    customer_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    order_date DATE NOT NULL,
+    quantity INTEGER CHECK (quantity > 0),
+    unit_price DECIMAL(10,2) CHECK (unit_price >= 0),
+    total_amount DECIMAL(12,2) GENERATED ALWAYS AS (quantity * unit_price),
+    status order_status_enum DEFAULT 'pending',
+
+    -- Business rules enforced at conceptual level
+    CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers(customer_id),
+    CONSTRAINT fk_product FOREIGN KEY (product_id) REFERENCES products(product_id),
+    CONSTRAINT chk_future_date CHECK (order_date <= CURRENT_DATE + INTERVAL '30 days')
+);
+
+-- INTERNAL SCHEMA (Physical Storage) - How data is actually stored
+-- Partition by date for performance
+CREATE TABLE orders_physical (
+    order_id BIGINT,
+    customer_id BIGINT,
+    product_id BIGINT,
+    order_date DATE,
+    quantity INTEGER,
+    unit_price DECIMAL(10,2),
+    total_amount DECIMAL(12,2),
+    status VARCHAR(20),
+    created_at TIMESTAMP DEFAULT NOW(),
+    row_version INTEGER DEFAULT 1,
+
+    -- Physical storage optimizations
+    INDEX idx_orders_date_customer (order_date, customer_id),
+    INDEX idx_orders_product_status (product_id, status),
+    INDEX idx_orders_total_amount (total_amount) WHERE total_amount > 1000
+
+) PARTITION BY RANGE (order_date) (
+    PARTITION orders_2023 VALUES LESS THAN ('2024-01-01'),
+    PARTITION orders_2024 VALUES LESS THAN ('2025-01-01'),
+    PARTITION orders_future VALUES LESS THAN (MAXVALUE)
+);
+
+-- Data Independence Demonstration
+-- 1. PHYSICAL DATA INDEPENDENCE: Change storage without affecting logical schema
+ALTER TABLE orders_physical ADD COLUMN partition_key VARCHAR(10);
+ALTER TABLE orders_physical SET TABLESPACE ssd_storage;
+
+-- Logical queries remain unchanged
+SELECT customer_id, COUNT(*) as order_count
+FROM order_management_logical
+WHERE order_date >= '2024-01-01'
+GROUP BY customer_id;
+
+-- 2. LOGICAL DATA INDEPENDENCE: Change logical structure without affecting external views
+-- Add new business rule to logical schema
+ALTER TABLE order_management_logical
+ADD COLUMN priority_level INTEGER DEFAULT 1 CHECK (priority_level BETWEEN 1 AND 5);
+
+-- External views remain stable
+SELECT * FROM sales_dashboard WHERE quarter = 'Q1-2024';
+```
+
+```
+
+```
