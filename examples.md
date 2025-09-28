@@ -206,15 +206,63 @@ BEGIN
     COMMIT;
     SET p_status = 'SUCCESS';
 END;
+
+-- Creating views for data abstraction
+CREATE VIEW customer_order_summary AS
+SELECT
+    c.customer_id,
+    c.first_name,
+    c.last_name,
+    c.email,
+    COUNT(o.order_id) as total_orders,
+    SUM(o.total_amount) as total_spent,
+    MAX(o.order_date) as last_order_date,
+    AVG(o.total_amount) as avg_order_value
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
+WHERE c.status = 'active'
+GROUP BY c.customer_id, c.first_name, c.last_name, c.email;
+```
+
+#### Schema Evolution and Maintenance
+
+```sql
+-- Adding new columns with default values
+ALTER TABLE customers
+ADD COLUMN loyalty_points INT DEFAULT 0,
+ADD COLUMN preferred_contact ENUM('email', 'sms', 'phone') DEFAULT 'email';
+
+-- Modifying existing constraints
+ALTER TABLE orders
+MODIFY COLUMN status ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned') DEFAULT 'pending';
+
+-- Creating composite indexes for performance
+CREATE INDEX idx_order_customer_date ON orders(customer_id, order_date);
+CREATE INDEX idx_product_category_price ON products(category_id, price);
+
+-- Adding partitioning for large tables
+ALTER TABLE orders
+PARTITION BY RANGE (YEAR(order_date)) (
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p2025 VALUES LESS THAN (2026),
+    PARTITION future VALUES LESS THAN MAXVALUE
+);
 ```
 
 ### A.3 Data Manipulation Language (DML)
 
 **📍 Location: SECTION A - A.3 Data Manipulation Language (DML)**
 
-#### Advanced Analytical Queries with Window Functions
+#### Basic Data Retrieval and Complex Joins
 
 ```sql
+-- Basic data retrieval
+SELECT customer_id, first_name, last_name, email
+FROM customers
+WHERE status = 'active'
+ORDER BY last_name, first_name;
+
 -- Complex joins with multiple tables
 SELECT
     c.first_name + ' ' + c.last_name as customer_name,
@@ -234,7 +282,11 @@ INNER JOIN products p ON oi.product_id = p.product_id
 WHERE o.order_date >= '2024-01-01'
     AND o.status IN ('shipped', 'delivered')
 ORDER BY o.order_date DESC, c.last_name;
+```
 
+#### Advanced Analytical Queries with Window Functions
+
+```sql
 -- Advanced analytical queries
 SELECT
     EXTRACT(YEAR FROM order_date) as order_year,
@@ -262,6 +314,103 @@ FROM orders
 WHERE status = 'delivered'
 GROUP BY EXTRACT(YEAR FROM order_date), EXTRACT(MONTH FROM order_date)
 ORDER BY order_year DESC, order_month DESC;
+```
+
+#### Data Modification Operations
+
+```sql
+-- Bulk data insertion
+INSERT INTO products (product_name, category_id, description, price, stock_quantity)
+VALUES
+    ('Laptop Pro 15"', 1, 'High-performance laptop with 16GB RAM', 1299.99, 25),
+    ('Wireless Mouse', 2, 'Ergonomic wireless mouse with USB receiver', 29.99, 150),
+    ('USB-C Hub', 2, '7-in-1 USB-C hub with HDMI and Ethernet', 79.99, 75),
+    ('Monitor 27"', 1, '4K IPS monitor with USB-C connectivity', 399.99, 40);
+
+-- Conditional updates with business logic
+UPDATE customers
+SET loyalty_points = loyalty_points + FLOOR(
+    (SELECT COALESCE(SUM(total_amount), 0) FROM orders
+     WHERE customer_id = customers.customer_id
+       AND status = 'delivered'
+       AND order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    ) / 10
+)
+WHERE status = 'active';
+
+-- Complex update with joins
+UPDATE products p
+INNER JOIN (
+    SELECT
+        oi.product_id,
+        SUM(oi.quantity) as total_sold
+    FROM order_items oi
+    INNER JOIN orders o ON oi.order_id = o.order_id
+    WHERE o.status = 'delivered'
+      AND o.order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 MONTH)
+    GROUP BY oi.product_id
+) sales_data ON p.product_id = sales_data.product_id
+SET p.stock_quantity = GREATEST(0, p.stock_quantity - sales_data.total_sold);
+
+-- Conditional deletions with safety checks
+DELETE FROM order_items
+WHERE order_id IN (
+    SELECT order_id FROM orders
+    WHERE status = 'cancelled'
+      AND order_date < DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)
+);
+```
+
+#### Complex Transaction Management
+
+```sql
+-- Complex transaction with error handling
+START TRANSACTION;
+
+-- Create order
+INSERT INTO orders (customer_id, order_date, status, total_amount, shipping_address, payment_method)
+VALUES (12345, NOW(), 'pending', 0, '123 Main St, City, State', 'credit_card');
+
+SET @order_id = LAST_INSERT_ID();
+
+-- Add order items and calculate total
+INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+SELECT @order_id, p.product_id, cart.quantity, p.price
+FROM temp_cart cart
+INNER JOIN products p ON cart.product_id = p.product_id
+WHERE cart.session_id = 'user_session_123';
+
+-- Update order total
+UPDATE orders
+SET total_amount = (
+    SELECT SUM(quantity * unit_price)
+    FROM order_items
+    WHERE order_id = @order_id
+)
+WHERE order_id = @order_id;
+
+-- Validate inventory
+SELECT @stock_issue := COUNT(*)
+FROM order_items oi
+INNER JOIN products p ON oi.product_id = p.product_id
+WHERE oi.order_id = @order_id
+  AND p.stock_quantity < oi.quantity;
+
+IF @stock_issue > 0 THEN
+    ROLLBACK;
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Insufficient inventory for order';
+ELSE
+    -- Update inventory
+    UPDATE products p
+    INNER JOIN order_items oi ON p.product_id = oi.product_id
+    SET p.stock_quantity = p.stock_quantity - oi.quantity
+    WHERE oi.order_id = @order_id;
+
+    -- Clear cart
+    DELETE FROM temp_cart WHERE session_id = 'user_session_123';
+
+    COMMIT;
+END IF;
 ```
 
 #### Common Table Expressions (CTEs)
@@ -353,6 +502,168 @@ SELECT
 FROM orders o
 WHERE DATE_TRUNC('month', o.order_date) = DATE_TRUNC('month', CURRENT_DATE)
   AND o.status IN ('delivered', 'shipped');
+```
+
+#### Inventory Management and Analytics Views
+
+```sql
+-- Inventory management view for warehouse staff
+CREATE VIEW inventory_management AS
+SELECT
+    p.product_id,
+    p.product_name,
+    c.category_name,
+    p.stock_quantity,
+    p.price,
+
+    -- Calculate reorder point based on sales velocity
+    COALESCE(sales_30days.avg_daily_sales * 14, 0) as suggested_reorder_point,
+
+    -- Stock status classification
+    CASE
+        WHEN p.stock_quantity = 0 THEN 'OUT_OF_STOCK'
+        WHEN p.stock_quantity <= COALESCE(sales_30days.avg_daily_sales * 7, 5) THEN 'LOW_STOCK'
+        WHEN p.stock_quantity <= COALESCE(sales_30days.avg_daily_sales * 14, 10) THEN 'MEDIUM_STOCK'
+        ELSE 'HIGH_STOCK'
+    END as stock_status,
+
+    -- Financial metrics
+    p.stock_quantity * p.price as inventory_value,
+    COALESCE(sales_30days.total_sold, 0) as units_sold_30days,
+    COALESCE(sales_30days.revenue_30days, 0) as revenue_30days,
+
+    -- Performance indicators
+    CASE
+        WHEN sales_30days.total_sold > 0
+        THEN p.stock_quantity / (sales_30days.total_sold / 30.0)
+        ELSE NULL
+    END as days_of_inventory_remaining
+
+FROM products p
+INNER JOIN categories c ON p.category_id = c.category_id
+LEFT JOIN (
+    SELECT
+        oi.product_id,
+        SUM(oi.quantity) as total_sold,
+        AVG(oi.quantity) as avg_daily_sales,
+        SUM(oi.quantity * oi.unit_price) as revenue_30days
+    FROM order_items oi
+    INNER JOIN orders o ON oi.order_id = o.order_id
+    WHERE o.order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 30 DAY)
+      AND o.status = 'delivered'
+    GROUP BY oi.product_id
+) sales_30days ON p.product_id = sales_30days.product_id;
+```
+
+#### Materialized Views for Performance
+
+```sql
+-- Materialized view for customer analytics (refreshed daily)
+CREATE MATERIALIZED VIEW customer_analytics_mv AS
+SELECT
+    c.customer_id,
+    c.first_name + ' ' + c.last_name as customer_name,
+    c.email,
+    c.registration_date,
+    c.status,
+
+    -- Order statistics
+    COUNT(o.order_id) as total_orders,
+    SUM(o.total_amount) as lifetime_value,
+    AVG(o.total_amount) as avg_order_value,
+    MIN(o.order_date) as first_order_date,
+    MAX(o.order_date) as last_order_date,
+
+    -- Customer segmentation
+    CASE
+        WHEN SUM(o.total_amount) >= 10000 THEN 'VIP'
+        WHEN SUM(o.total_amount) >= 5000 THEN 'PREMIUM'
+        WHEN SUM(o.total_amount) >= 1000 THEN 'REGULAR'
+        WHEN COUNT(o.order_id) > 0 THEN 'NEW'
+        ELSE 'PROSPECT'
+    END as customer_segment,
+
+    -- Behavioral analysis
+    DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order,
+    COUNT(DISTINCT DATE_TRUNC('month', o.order_date)) as active_months,
+
+    -- Purchase patterns
+    (SELECT category_name FROM categories WHERE category_id =
+        (SELECT category_id FROM products WHERE product_id =
+            (SELECT product_id FROM order_items WHERE order_id IN
+                (SELECT order_id FROM orders WHERE customer_id = c.customer_id)
+             GROUP BY product_id ORDER BY SUM(quantity) DESC LIMIT 1)
+        )
+    ) as favorite_category
+
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id AND o.status = 'delivered'
+GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.registration_date, c.status;
+
+-- Create refresh schedule for materialized view
+CREATE EVENT refresh_customer_analytics
+ON SCHEDULE EVERY 1 DAY
+STARTS CURRENT_DATE + INTERVAL 1 DAY + INTERVAL 2 HOUR
+DO REFRESH MATERIALIZED VIEW customer_analytics_mv;
+```
+
+### A.5 SQL as Unified Database Language
+
+**📍 Location: SECTION A - A.5 SQL as Unified Database Language**
+
+#### Complete Database Solution Implementation
+
+```sql
+-- DDL: Create comprehensive database structure
+CREATE DATABASE ecommerce_platform;
+USE ecommerce_platform;
+
+-- Create enum types for data consistency
+CREATE TYPE order_status_enum AS ENUM ('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned');
+CREATE TYPE payment_method_enum AS ENUM ('credit_card', 'debit_card', 'paypal', 'bank_transfer', 'cash_on_delivery');
+
+-- DDL + SDL: Create optimized table structures
+CREATE TABLE IF NOT EXISTS customers (
+    customer_id BIGSERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20),
+    date_of_birth DATE,
+    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active',
+    loyalty_points INTEGER DEFAULT 0,
+    credit_limit DECIMAL(10,2) DEFAULT 1000.00,
+    preferred_language VARCHAR(5) DEFAULT 'en-US',
+    marketing_consent BOOLEAN DEFAULT FALSE,
+
+    -- Comprehensive constraints
+    CONSTRAINT chk_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    CONSTRAINT chk_credit_limit CHECK (credit_limit >= 0),
+    CONSTRAINT chk_loyalty_points CHECK (loyalty_points >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- DML: Populate with sample data
+INSERT INTO customers (email, password_hash, first_name, last_name, phone, date_of_birth) VALUES
+('john.doe@email.com', SHA2('password123', 256), 'John', 'Doe', '+1-555-0101', '1985-06-15'),
+('jane.smith@email.com', SHA2('securepass', 256), 'Jane', 'Smith', '+1-555-0102', '1990-03-22'),
+('bob.wilson@email.com', SHA2('mypassword', 256), 'Bob', 'Wilson', '+1-555-0103', '1988-11-08');
+
+-- VDL: Create customer service view
+CREATE VIEW customer_service_portal AS
+SELECT
+    customer_id,
+    first_name + ' ' + last_name as full_name,
+    email,
+    phone,
+    status,
+    loyalty_points,
+    registration_date,
+    DATEDIFF(CURRENT_DATE, registration_date) AS days_as_customer
+FROM customers
+WHERE status != 'suspended';
 ```
 
 ### A.5 Procedural vs Declarative Languages
