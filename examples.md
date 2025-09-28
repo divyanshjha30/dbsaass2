@@ -359,6 +359,56 @@ WHERE DATE_TRUNC('month', o.order_date) = DATE_TRUNC('month', CURRENT_DATE)
 
 **📍 Location: SECTION A - A.6 Declarative vs Procedural Language Paradigms**
 
+#### Declarative Example - Advanced Analytics
+
+```sql
+-- Complex analytical query - Declarative approach
+-- System optimizes execution automatically
+SELECT
+    c.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) as customer_name,
+    COUNT(o.order_id) as total_orders,
+    SUM(o.total_amount) as total_spent,
+    AVG(o.total_amount) as avg_order_value,
+
+    -- Window functions for advanced analytics
+    RANK() OVER (ORDER BY SUM(o.total_amount) DESC) as spending_rank,
+    PERCENT_RANK() OVER (ORDER BY SUM(o.total_amount)) as spending_percentile,
+
+    -- Moving averages
+    AVG(o.total_amount) OVER (
+        PARTITION BY c.customer_id
+        ORDER BY o.order_date
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) as moving_avg_order_value,
+
+    -- Lead/Lag functions for trend analysis
+    LAG(o.total_amount, 1) OVER (
+        PARTITION BY c.customer_id
+        ORDER BY o.order_date
+    ) as previous_order_amount,
+
+    -- Conditional aggregation
+    SUM(CASE WHEN o.order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+             THEN o.total_amount ELSE 0 END) as spending_last_year,
+
+    -- Complex case statements
+    CASE
+        WHEN COUNT(o.order_id) >= 50 AND SUM(o.total_amount) >= 10000 THEN 'VIP Customer'
+        WHEN COUNT(o.order_id) >= 20 AND SUM(o.total_amount) >= 5000 THEN 'Premium Customer'
+        WHEN COUNT(o.order_id) >= 10 THEN 'Regular Customer'
+        WHEN COUNT(o.order_id) >= 1 THEN 'New Customer'
+        ELSE 'Prospect'
+    END as customer_classification
+
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id AND o.status = 'delivered'
+WHERE c.status = 'active'
+GROUP BY c.customer_id, c.first_name, c.last_name
+HAVING SUM(o.total_amount) > 100  -- Only customers with meaningful spending
+ORDER BY total_spent DESC, total_orders DESC;
+```
+
 #### Procedural Example - Complex Business Logic
 
 ```sql
@@ -439,15 +489,42 @@ BEGIN
         SET v_tier_bonus = 0;
     END IF;
 
-    -- Step 4: Calculate final points
+    -- Step 4: Apply activity bonuses
+    IF v_months_active >= 12 THEN
+        SET v_bonus_multiplier = v_bonus_multiplier + 0.2;
+    END IF;
+
+    -- Step 5: Check for recent activity bonus
+    IF DATEDIFF(p_calculation_date, v_last_order_date) <= 30 THEN
+        SET v_tier_bonus = v_tier_bonus + 50;
+    END IF;
+
+    -- Step 6: Calculate final points
     SET p_points_earned = ROUND(v_base_points * v_bonus_multiplier) + v_tier_bonus;
 
-    -- Step 5: Update customer record
+    -- Step 7: Update customer record
     UPDATE customers
     SET
         loyalty_points = loyalty_points + p_points_earned,
         last_updated = p_calculation_date
     WHERE customer_id = p_customer_id;
+
+    -- Step 8: Log the transaction
+    INSERT INTO loyalty_transactions (
+        customer_id,
+        transaction_date,
+        points_earned,
+        tier_status,
+        calculation_basis,
+        created_at
+    ) VALUES (
+        p_customer_id,
+        p_calculation_date,
+        p_points_earned,
+        p_tier_status,
+        CONCAT('Spent: $', v_total_spent, ', Orders: ', v_order_count),
+        NOW()
+    );
 
     -- Commit transaction if no errors
     IF v_error_count = 0 THEN
@@ -456,6 +533,13 @@ BEGIN
     ELSE
         ROLLBACK;
     END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        SET p_processing_status = CONCAT('CRITICAL ERROR: ', SQLERRM);
+        SET p_points_earned = 0;
+        SET p_tier_status = 'ERROR';
 
 END//
 
@@ -466,11 +550,219 @@ CALL calculate_customer_rewards(12345, CURRENT_DATE, @points, @tier, @status);
 SELECT @points as points_earned, @tier as new_tier, @status as processing_result;
 ```
 
+#### Hybrid Approach - Best of Both Worlds
+
+```sql
+-- Stored function combining declarative and procedural approaches
+CREATE FUNCTION get_customer_lifetime_metrics(p_customer_id INT)
+RETURNS JSON
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE result JSON DEFAULT JSON_OBJECT();
+    DECLARE v_customer_data JSON;
+    DECLARE v_order_stats JSON;
+    DECLARE v_product_preferences JSON;
+
+    -- Declarative query for customer data
+    SELECT JSON_OBJECT(
+        'customer_id', customer_id,
+        'name', CONCAT(first_name, ' ', last_name),
+        'email', email,
+        'registration_date', registration_date,
+        'status', status,
+        'current_loyalty_points', loyalty_points
+    ) INTO v_customer_data
+    FROM customers
+    WHERE customer_id = p_customer_id;
+
+    -- Declarative query for order statistics
+    SELECT JSON_OBJECT(
+        'total_orders', COUNT(*),
+        'total_spent', COALESCE(SUM(total_amount), 0),
+        'avg_order_value', COALESCE(AVG(total_amount), 0),
+        'first_order_date', MIN(order_date),
+        'last_order_date', MAX(order_date),
+        'favorite_payment_method', (
+            SELECT payment_method
+            FROM orders
+            WHERE customer_id = p_customer_id
+            GROUP BY payment_method
+            ORDER BY COUNT(*) DESC
+            LIMIT 1
+        )
+    ) INTO v_order_stats
+    FROM orders
+    WHERE customer_id = p_customer_id AND status = 'delivered';
+
+    -- Combine results using procedural logic
+    SET result = JSON_MERGE_PRESERVE(
+        JSON_OBJECT('customer_info', v_customer_data),
+        JSON_OBJECT('order_statistics', v_order_stats),
+        JSON_OBJECT('analysis_date', NOW())
+    );
+
+    RETURN result;
+END;
+
+-- Usage
+SELECT get_customer_lifetime_metrics(12345) as customer_analysis;
+```
+
 ---
 
 ## 3. SECTION B - ARCHITECTURE INTEGRATION
 
-### B.1 Data Independence Examples
+### B.1 Advanced SDL Implementation
+
+**📍 Location: SECTION B - B.1 Detailed Architecture Analysis**
+
+#### PostgreSQL Storage Configuration
+
+```sql
+-- PostgreSQL Storage Configuration
+CREATE TABLESPACE fast_storage LOCATION '/mnt/ssd/postgres_data';
+CREATE TABLESPACE archive_storage LOCATION '/mnt/hdd/postgres_archive';
+
+-- Table with specific storage parameters
+CREATE TABLE high_frequency_transactions (
+    transaction_id BIGSERIAL PRIMARY KEY,
+    account_id BIGINT NOT NULL,
+    transaction_date TIMESTAMP DEFAULT NOW(),
+    amount DECIMAL(15,2),
+    transaction_type VARCHAR(20),
+    description TEXT
+) TABLESPACE fast_storage
+WITH (
+    fillfactor = 90,          -- Leave 10% free space for updates
+    parallel_workers = 4,     -- Enable parallel operations
+    autovacuum_enabled = true,
+    autovacuum_vacuum_scale_factor = 0.1
+);
+
+-- Partition tables for better performance (SDL aspect)
+CREATE TABLE transaction_archive (
+    transaction_id BIGINT,
+    account_id BIGINT,
+    transaction_date TIMESTAMP,
+    amount DECIMAL(15,2),
+    transaction_type VARCHAR(20),
+    description TEXT
+) PARTITION BY RANGE (transaction_date);
+
+-- Create monthly partitions
+CREATE TABLE transaction_archive_2024_01 PARTITION OF transaction_archive
+    FOR VALUES FROM ('2024-01-01') TO ('2024-02-01')
+    TABLESPACE archive_storage;
+
+CREATE TABLE transaction_archive_2024_02 PARTITION OF transaction_archive
+    FOR VALUES FROM ('2024-02-01') TO ('2024-03-01')
+    TABLESPACE archive_storage;
+
+-- Advanced indexing strategies (SDL)
+CREATE INDEX CONCURRENTLY idx_transaction_account_date
+ON high_frequency_transactions (account_id, transaction_date DESC)
+INCLUDE (amount, transaction_type)
+WITH (fillfactor = 90);
+
+-- Partial indexes for specific query patterns
+CREATE INDEX idx_large_transactions
+ON high_frequency_transactions (transaction_date, amount)
+WHERE amount > 10000;
+
+-- Expression indexes for computed values
+CREATE INDEX idx_transaction_month
+ON high_frequency_transactions (date_trunc('month', transaction_date));
+```
+
+#### Bank Teller View Interface
+
+```sql
+-- Bank teller view (operational data access)
+CREATE VIEW teller_transaction_interface AS
+SELECT
+    c.customer_number,
+    c.first_name || ' ' || c.last_name as customer_name,
+    c.phone,
+    a.account_number,
+    a.account_name,
+    at.type_name as account_type,
+    a.current_balance,
+    a.available_balance,
+    a.overdraft_limit,
+
+    -- Transaction limits and controls
+    dtl.transactions_today,
+    dtl.amount_today,
+    at.transaction_limit_daily,
+    (at.transaction_limit_daily - COALESCE(dtl.amount_today, 0)) as remaining_daily_limit,
+
+    -- Account restrictions
+    CASE
+        WHEN a.status = 'frozen' THEN 'Account frozen - manager approval required'
+        WHEN c.risk_profile = 'high' THEN 'High risk customer - verify identity'
+        WHEN (at.transaction_limit_daily - COALESCE(dtl.amount_today, 0)) < 100 THEN 'Near daily limit'
+        ELSE 'Normal operations'
+    END as transaction_notes,
+
+    -- Recent transaction history
+    (SELECT json_agg(json_build_object(
+        'date', t.transaction_date,
+        'type', t.transaction_type,
+        'amount', t.amount,
+        'description', t.description
+    ) ORDER BY t.transaction_date DESC)
+     FROM transactions t
+     WHERE t.account_id = a.account_id
+       AND t.transaction_date >= CURRENT_DATE - INTERVAL '7 days'
+     LIMIT 10
+    ) as recent_transactions
+
+FROM customers c
+INNER JOIN accounts a ON c.customer_id = a.customer_id
+INNER JOIN account_types at ON a.account_type_id = at.type_id
+LEFT JOIN daily_transaction_limits dtl ON a.account_id = dtl.account_id
+    AND dtl.limit_date = CURRENT_DATE
+WHERE c.status != 'closed'
+  AND a.status != 'closed';
+
+-- Management reporting view (analytical perspective)
+CREATE VIEW management_portfolio_analysis AS
+SELECT
+    at.type_name as account_type,
+    COUNT(DISTINCT a.account_id) as total_accounts,
+    COUNT(DISTINCT c.customer_id) as unique_customers,
+    SUM(a.current_balance) as total_balance,
+    AVG(a.current_balance) as average_balance,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a.current_balance) as median_balance,
+
+    -- Risk analysis
+    COUNT(CASE WHEN c.risk_profile = 'high' THEN 1 END) as high_risk_customers,
+    SUM(CASE WHEN a.current_balance < 0 THEN a.current_balance ELSE 0 END) as total_overdraft,
+
+    -- Activity analysis
+    SUM(CASE WHEN a.last_transaction_date >= CURRENT_DATE - INTERVAL '30 days'
+             THEN 1 ELSE 0 END) as active_accounts_30_days,
+
+    -- Performance metrics
+    SUM(a.interest_accrued) as total_interest_accrued,
+    SUM(COALESCE(at.maintenance_fee, 0)) as potential_fee_revenue,
+
+    -- Growth trends
+    COUNT(CASE WHEN a.opened_date >= CURRENT_DATE - INTERVAL '1 year'
+               THEN 1 END) as new_accounts_this_year,
+    COUNT(CASE WHEN a.closed_date >= CURRENT_DATE - INTERVAL '1 year'
+               THEN 1 END) as closed_accounts_this_year
+
+FROM account_types at
+LEFT JOIN accounts a ON at.type_id = a.account_type_id
+LEFT JOIN customers c ON a.customer_id = c.customer_id
+WHERE at.is_active = true
+GROUP BY at.type_id, at.type_name
+ORDER BY total_balance DESC;
+```
+
+### B.2 Data Independence Examples
 
 **📍 Location: SECTION B - B.3 Data Independence Demonstration**
 
@@ -619,6 +911,10 @@ WITH customer_metrics AS (
         EXTRACT(DAYS FROM NOW() - MAX(o.order_date)) as days_since_last_order,
         COUNT(DISTINCT DATE_TRUNC('month', o.order_date)) as active_months,
 
+        -- Seasonal analysis
+        COUNT(CASE WHEN EXTRACT(QUARTER FROM o.order_date) = 4 THEN 1 END) as q4_orders,
+        COUNT(CASE WHEN EXTRACT(QUARTER FROM o.order_date) = 1 THEN 1 END) as q1_orders,
+
         -- Product diversity
         COUNT(DISTINCT oi.product_id) as unique_products_purchased,
 
@@ -678,9 +974,392 @@ GROUP BY lifecycle_stage, churn_risk
 ORDER BY total_segment_value DESC;
 ```
 
+#### Product Performance Analysis
+
+```sql
+-- Product performance analysis with inventory optimization
+WITH product_performance AS (
+    SELECT
+        p.product_id,
+        p.product_sku,
+        p.product_name,
+        c.category_name,
+        b.brand_name,
+        p.base_price,
+        p.stock_quantity,
+        p.low_stock_threshold,
+
+        -- Sales metrics (last 90 days)
+        COUNT(oi.order_item_id) as total_orders,
+        SUM(oi.quantity) as units_sold,
+        SUM(oi.quantity * oi.unit_price) as gross_revenue,
+        SUM(oi.quantity * (oi.unit_price - p.cost_price)) as gross_profit,
+        AVG(oi.unit_price) as avg_selling_price,
+
+        -- Performance calculations
+        CASE
+            WHEN SUM(oi.quantity) > 0
+            THEN p.stock_quantity / (SUM(oi.quantity) / 90.0)
+            ELSE NULL
+        END as days_of_inventory,
+
+        -- Velocity classification
+        CASE
+            WHEN SUM(oi.quantity) >= 100 THEN 'Fast Moving'
+            WHEN SUM(oi.quantity) >= 20 THEN 'Regular Moving'
+            WHEN SUM(oi.quantity) >= 1 THEN 'Slow Moving'
+            ELSE 'Dead Stock'
+        END as velocity_category,
+
+        -- Stock status
+        CASE
+            WHEN p.stock_quantity = 0 THEN 'Out of Stock'
+            WHEN p.stock_quantity <= p.low_stock_threshold THEN 'Low Stock'
+            WHEN p.stock_quantity > p.low_stock_threshold * 5 THEN 'Overstock'
+            ELSE 'Normal'
+        END as stock_status
+
+    FROM products p
+    INNER JOIN categories c ON p.category_id = c.category_id
+    LEFT JOIN brands b ON p.brand_id = b.brand_id
+    LEFT JOIN order_items oi ON p.product_id = oi.product_id
+    LEFT JOIN orders o ON oi.order_id = o.order_id
+        AND o.order_date >= CURRENT_DATE - INTERVAL '90 days'
+        AND o.status IN ('completed', 'shipped', 'delivered')
+    WHERE p.status = 'active'
+    GROUP BY p.product_id, p.product_sku, p.product_name, c.category_name,
+             b.brand_name, p.base_price, p.stock_quantity, p.low_stock_threshold
+)
+SELECT
+    velocity_category,
+    stock_status,
+    COUNT(*) as product_count,
+    SUM(gross_revenue) as total_revenue,
+    SUM(gross_profit) as total_profit,
+    ROUND(AVG(days_of_inventory), 1) as avg_days_inventory,
+    SUM(stock_quantity * base_price) as inventory_value,
+
+    -- Recommendations
+    SUM(CASE WHEN stock_status = 'Out of Stock' AND velocity_category = 'Fast Moving'
+             THEN 1 ELSE 0 END) as urgent_restock_needed,
+    SUM(CASE WHEN stock_status = 'Overstock' AND velocity_category = 'Slow Moving'
+             THEN 1 ELSE 0 END) as clearance_candidates
+
+FROM product_performance
+GROUP BY velocity_category, stock_status
+ORDER BY total_revenue DESC;
+```
+
+#### Order Processing Workflow
+
+```sql
+-- Comprehensive order processing stored procedure
+CREATE OR REPLACE FUNCTION process_customer_order(
+    p_customer_id BIGINT,
+    p_cart_items JSON,
+    p_shipping_address JSON,
+    p_billing_address JSON,
+    p_payment_method VARCHAR(50),
+    p_coupon_code VARCHAR(50) DEFAULT NULL
+) RETURNS JSON AS $$
+DECLARE
+    v_order_id BIGINT;
+    v_order_number VARCHAR(50);
+    v_subtotal DECIMAL(15,2) := 0;
+    v_tax_amount DECIMAL(15,2) := 0;
+    v_shipping_amount DECIMAL(15,2) := 0;
+    v_discount_amount DECIMAL(15,2) := 0;
+    v_total_amount DECIMAL(15,2);
+    v_customer_tier loyalty_tier_enum;
+    v_stock_issues JSON := '[]';
+    v_processing_errors JSON := '[]';
+    v_result JSON;
+
+    cart_item JSON;
+    v_product_id BIGINT;
+    v_quantity INTEGER;
+    v_unit_price DECIMAL(10,2);
+    v_available_stock INTEGER;
+    v_item_total DECIMAL(10,2);
+
+BEGIN
+    -- Input validation
+    IF p_customer_id IS NULL OR p_cart_items IS NULL THEN
+        RETURN json_build_object(
+            'success', false,
+            'error', 'Invalid input parameters',
+            'order_id', null
+        );
+    END IF;
+
+    -- Get customer information
+    SELECT loyalty_tier INTO v_customer_tier
+    FROM customers
+    WHERE customer_id = p_customer_id AND status = 'active';
+
+    IF v_customer_tier IS NULL THEN
+        RETURN json_build_object(
+            'success', false,
+            'error', 'Customer not found or inactive',
+            'order_id', null
+        );
+    END IF;
+
+    -- Start transaction
+    BEGIN
+        -- Generate order number
+        SELECT 'ORD-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' ||
+               LPAD(NEXTVAL('order_number_seq')::TEXT, 6, '0') INTO v_order_number;
+
+        -- Validate cart items and check stock
+        FOR cart_item IN SELECT * FROM json_array_elements(p_cart_items)
+        LOOP
+            v_product_id := (cart_item->>'product_id')::BIGINT;
+            v_quantity := (cart_item->>'quantity')::INTEGER;
+
+            -- Check product availability and stock
+            SELECT base_price, stock_quantity
+            INTO v_unit_price, v_available_stock
+            FROM products
+            WHERE product_id = v_product_id AND status = 'active';
+
+            IF v_unit_price IS NULL THEN
+                v_processing_errors := v_processing_errors ||
+                    json_build_object('error', 'Product not found', 'product_id', v_product_id);
+                CONTINUE;
+            END IF;
+
+            IF v_available_stock < v_quantity THEN
+                v_stock_issues := v_stock_issues ||
+                    json_build_object(
+                        'product_id', v_product_id,
+                        'requested', v_quantity,
+                        'available', v_available_stock
+                    );
+                CONTINUE;
+            END IF;
+
+            -- Calculate item total
+            v_item_total := v_unit_price * v_quantity;
+            v_subtotal := v_subtotal + v_item_total;
+        END LOOP;
+
+        -- Check for errors
+        IF json_array_length(v_processing_errors) > 0 OR json_array_length(v_stock_issues) > 0 THEN
+            RETURN json_build_object(
+                'success', false,
+                'error', 'Order validation failed',
+                'stock_issues', v_stock_issues,
+                'processing_errors', v_processing_errors
+            );
+        END IF;
+
+        -- Apply customer tier discounts
+        CASE v_customer_tier
+            WHEN 'platinum' THEN v_discount_amount := v_subtotal * 0.15;
+            WHEN 'gold' THEN v_discount_amount := v_subtotal * 0.10;
+            WHEN 'silver' THEN v_discount_amount := v_subtotal * 0.05;
+            ELSE v_discount_amount := 0;
+        END CASE;
+
+        -- Calculate tax (8.5% rate example)
+        v_tax_amount := (v_subtotal - v_discount_amount) * 0.085;
+
+        -- Calculate shipping
+        IF (v_subtotal - v_discount_amount) >= 100 THEN
+            v_shipping_amount := 0;
+        ELSE
+            v_shipping_amount := 15.99;
+        END IF;
+
+        -- Calculate total
+        v_total_amount := v_subtotal - v_discount_amount + v_tax_amount + v_shipping_amount;
+
+        -- Create order record
+        INSERT INTO orders (
+            order_number, customer_id, status, subtotal, tax_amount,
+            shipping_amount, discount_amount, total_amount, payment_method,
+            billing_first_name, billing_last_name, billing_address_1,
+            shipping_first_name, shipping_last_name, shipping_address_1
+        ) VALUES (
+            v_order_number, p_customer_id, 'pending', v_subtotal, v_tax_amount,
+            v_shipping_amount, v_discount_amount, v_total_amount, p_payment_method,
+            p_billing_address->>'first_name', p_billing_address->>'last_name',
+            p_billing_address->>'address_1',
+            p_shipping_address->>'first_name', p_shipping_address->>'last_name',
+            p_shipping_address->>'address_1'
+        ) RETURNING order_id INTO v_order_id;
+
+        -- Create order items and update inventory
+        FOR cart_item IN SELECT * FROM json_array_elements(p_cart_items)
+        LOOP
+            v_product_id := (cart_item->>'product_id')::BIGINT;
+            v_quantity := (cart_item->>'quantity')::INTEGER;
+
+            SELECT base_price INTO v_unit_price
+            FROM products WHERE product_id = v_product_id;
+
+            -- Insert order item
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+            VALUES (v_order_id, v_product_id, v_quantity, v_unit_price);
+
+            -- Update inventory
+            UPDATE products
+            SET stock_quantity = stock_quantity - v_quantity,
+                updated_at = NOW()
+            WHERE product_id = v_product_id;
+        END LOOP;
+
+        -- Update customer lifetime value
+        UPDATE customers
+        SET lifetime_value = lifetime_value + v_total_amount,
+            updated_at = NOW()
+        WHERE customer_id = p_customer_id;
+
+        -- Success response
+        v_result := json_build_object(
+            'success', true,
+            'order_id', v_order_id,
+            'order_number', v_order_number,
+            'total_amount', v_total_amount,
+            'message', 'Order processed successfully'
+        );
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            v_result := json_build_object(
+                'success', false,
+                'error', 'Database error during order processing',
+                'details', SQLERRM
+            );
+    END;
+
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Usage example
+SELECT process_customer_order(
+    12345,
+    '[{"product_id": 101, "quantity": 2}, {"product_id": 102, "quantity": 1}]',
+    '{"first_name": "John", "last_name": "Doe", "address_1": "123 Main St"}',
+    '{"first_name": "John", "last_name": "Doe", "address_1": "123 Main St"}',
+    'credit_card',
+    'SAVE10'
+) as order_result;
+```
+
 ### C.2 Banking System Case Study
 
 **📍 Location: SECTION C - C.2 Financial Services Banking System Case Study**
+
+#### Banking Schema with Business Rules
+
+```sql
+-- Complete conceptual schema for banking system
+CREATE SCHEMA banking_core;
+SET search_path TO banking_core;
+
+-- Core entity definitions with business rules
+CREATE TABLE account_types (
+    type_id SERIAL PRIMARY KEY,
+    type_name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    min_balance DECIMAL(15,2) DEFAULT 0,
+    interest_rate DECIMAL(5,4) DEFAULT 0,
+    transaction_limit_daily DECIMAL(15,2),
+    maintenance_fee DECIMAL(10,2) DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE customers (
+    customer_id BIGSERIAL PRIMARY KEY,
+    customer_number VARCHAR(20) UNIQUE NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    date_of_birth DATE NOT NULL,
+    ssn_hash VARCHAR(64) UNIQUE,  -- Hashed for privacy
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(50),
+    postal_code VARCHAR(20),
+    country VARCHAR(50) DEFAULT 'USA',
+    customer_since DATE DEFAULT CURRENT_DATE,
+    status VARCHAR(20) DEFAULT 'active',
+    risk_profile VARCHAR(20) DEFAULT 'medium',
+    last_updated TIMESTAMP DEFAULT NOW(),
+
+    -- Business rule constraints
+    CONSTRAINT chk_customer_status CHECK (status IN ('active', 'inactive', 'suspended', 'closed')),
+    CONSTRAINT chk_risk_profile CHECK (risk_profile IN ('low', 'medium', 'high')),
+    CONSTRAINT chk_birth_date CHECK (date_of_birth <= CURRENT_DATE - INTERVAL '18 years'),
+    CONSTRAINT chk_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+);
+
+CREATE TABLE accounts (
+    account_id BIGSERIAL PRIMARY KEY,
+    account_number VARCHAR(20) UNIQUE NOT NULL,
+    customer_id BIGINT NOT NULL,
+    account_type_id INTEGER NOT NULL,
+    account_name VARCHAR(100) NOT NULL,
+    current_balance DECIMAL(15,2) DEFAULT 0,
+    available_balance DECIMAL(15,2) DEFAULT 0,
+    opened_date DATE DEFAULT CURRENT_DATE,
+    closed_date DATE,
+    status VARCHAR(20) DEFAULT 'active',
+    overdraft_limit DECIMAL(15,2) DEFAULT 0,
+    last_transaction_date TIMESTAMP,
+    interest_accrued DECIMAL(15,2) DEFAULT 0,
+
+    -- Foreign key relationships
+    CONSTRAINT fk_account_customer FOREIGN KEY (customer_id)
+        REFERENCES customers(customer_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_account_type FOREIGN KEY (account_type_id)
+        REFERENCES account_types(type_id) ON DELETE RESTRICT,
+
+    -- Business rule constraints
+    CONSTRAINT chk_account_status CHECK (status IN ('active', 'inactive', 'frozen', 'closed')),
+    CONSTRAINT chk_balance_positive CHECK (current_balance >= -overdraft_limit),
+    CONSTRAINT chk_closed_date CHECK (closed_date IS NULL OR closed_date >= opened_date)
+);
+
+-- Triggers for business logic enforcement
+CREATE OR REPLACE FUNCTION update_account_balance()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Update current and available balances
+    IF TG_OP = 'INSERT' THEN
+        UPDATE accounts
+        SET current_balance = current_balance + NEW.amount,
+            available_balance = CASE
+                WHEN NEW.amount > 0 THEN available_balance + NEW.amount
+                ELSE GREATEST(available_balance + NEW.amount, -overdraft_limit)
+            END,
+            last_transaction_date = NEW.transaction_date
+        WHERE account_id = NEW.account_id;
+
+        -- Update daily limits
+        INSERT INTO daily_transaction_limits (account_id, limit_date, transactions_today, amount_today)
+        VALUES (NEW.account_id, NEW.transaction_date::DATE, 1, ABS(NEW.amount))
+        ON CONFLICT (account_id, limit_date) DO UPDATE
+        SET transactions_today = daily_transaction_limits.transactions_today + 1,
+            amount_today = daily_transaction_limits.amount_today + ABS(NEW.amount);
+
+        RETURN NEW;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_balance_after_transaction
+    AFTER INSERT ON transactions
+    FOR EACH ROW EXECUTE FUNCTION update_account_balance();
+```
 
 #### HIPAA-Compliant Banking Views
 
@@ -719,13 +1398,82 @@ SELECT
         WHEN c.risk_score > 80 THEN 'HIGH'
         WHEN c.risk_score > 50 THEN 'MEDIUM'
         ELSE 'LOW'
-    END as risk_level
+    END as risk_level,
+
+    -- Recent activity flags
+    (SELECT COUNT(*) FROM transactions t
+     INNER JOIN accounts acc ON t.account_id = acc.account_id
+     WHERE acc.customer_id = c.customer_id
+       AND t.transaction_date >= CURRENT_DATE - INTERVAL '24 hours'
+       AND t.suspicious_activity_flag = true
+    ) as recent_suspicious_transactions
 
 FROM customers c
 LEFT JOIN accounts a ON c.customer_id = a.customer_id
 WHERE c.status IN ('active', 'restricted')
 GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.phone,
          c.customer_since, c.status, c.risk_score
+WITH CHECK OPTION;
+
+-- Compliance officer view - full audit trail access
+CREATE VIEW compliance_audit_trail AS
+SELECT
+    t.transaction_id,
+    t.account_id,
+    a.account_number,
+    c.customer_id,
+    -- Full customer details for compliance
+    c.first_name,
+    c.last_name,
+    c.ssn_hash,
+
+    -- Transaction details
+    t.transaction_date,
+    t.transaction_type,
+    t.amount,
+    t.description,
+    t.source_account,
+    t.destination_account,
+
+    -- Risk and compliance flags
+    t.suspicious_activity_flag,
+    t.large_cash_transaction_flag,
+    t.cross_border_flag,
+    t.aml_risk_score,
+
+    -- Regulatory reporting fields
+    CASE
+        WHEN t.amount >= 10000 THEN 'CTR_REQUIRED'  -- Currency Transaction Report
+        WHEN t.suspicious_activity_flag THEN 'SAR_REQUIRED'  -- Suspicious Activity Report
+        WHEN t.cross_border_flag AND t.amount >= 3000 THEN 'FBAR_RELEVANT'
+        ELSE 'STANDARD'
+    END as regulatory_requirement,
+
+    -- Geographic risk assessment
+    CASE
+        WHEN t.originating_country IN (SELECT country_code FROM high_risk_countries)
+        THEN 'HIGH_RISK_GEOGRAPHY'
+        ELSE 'STANDARD_GEOGRAPHY'
+    END as geographic_risk,
+
+    -- Processing metadata
+    t.processed_by_user,
+    t.approval_status,
+    t.approval_date,
+    t.created_at,
+    t.updated_at
+
+FROM transactions t
+INNER JOIN accounts a ON t.account_id = a.account_id
+INNER JOIN customers c ON a.customer_id = c.customer_id
+WHERE
+    -- Compliance officer access control
+    CURRENT_USER IN (SELECT user_name FROM compliance_officers)
+    AND (
+        t.amount >= 3000  -- Focus on significant transactions
+        OR t.suspicious_activity_flag = true
+        OR t.cross_border_flag = true
+    )
 WITH CHECK OPTION;
 ```
 
@@ -744,6 +1492,7 @@ DECLARE
     v_risk_score INTEGER := 0;
     v_risk_factors JSON := '[]';
     v_customer_profile JSON;
+    v_account_history JSON;
     v_velocity_check JSON;
     v_geographic_risk INTEGER := 0;
     v_behavioral_risk INTEGER := 0;
@@ -751,6 +1500,47 @@ DECLARE
     v_final_decision VARCHAR(20);
 
 BEGIN
+    -- Get customer baseline profile
+    SELECT json_build_object(
+        'customer_id', c.customer_id,
+        'risk_profile', c.risk_profile,
+        'account_age_days', EXTRACT(DAYS FROM NOW() - a.opened_date),
+        'typical_balance', AVG(dh.end_of_day_balance),
+        'typical_transaction_amount', AVG(t.amount),
+        'typical_locations', array_agg(DISTINCT t.location_city)
+    ) INTO v_customer_profile
+    FROM accounts a
+    INNER JOIN customers c ON a.customer_id = c.customer_id
+    LEFT JOIN daily_balance_history dh ON a.account_id = dh.account_id
+        AND dh.balance_date >= CURRENT_DATE - INTERVAL '90 days'
+    LEFT JOIN transactions t ON a.account_id = t.account_id
+        AND t.transaction_date >= CURRENT_DATE - INTERVAL '90 days'
+        AND t.status = 'completed'
+    WHERE a.account_id = p_account_id
+    GROUP BY c.customer_id, c.risk_profile, a.opened_date;
+
+    -- Velocity-based risk assessment
+    WITH velocity_analysis AS (
+        SELECT
+            COUNT(*) as transactions_today,
+            SUM(amount) as amount_today,
+            COUNT(CASE WHEN amount > 1000 THEN 1 END) as large_transactions_today,
+            COUNT(DISTINCT merchant_category) as unique_merchants_today,
+            COUNT(DISTINCT location_city) as unique_locations_today
+        FROM transactions
+        WHERE account_id = p_account_id
+          AND DATE(transaction_date) = CURRENT_DATE
+          AND status IN ('completed', 'pending')
+    )
+    SELECT json_build_object(
+        'transactions_today', transactions_today,
+        'amount_today', amount_today,
+        'large_transactions_today', large_transactions_today,
+        'unique_merchants_today', unique_merchants_today,
+        'unique_locations_today', unique_locations_today
+    ) INTO v_velocity_check
+    FROM velocity_analysis;
+
     -- Geographic risk assessment
     IF p_location_data->>'country' != 'USA' THEN
         v_geographic_risk := v_geographic_risk + 25;
@@ -761,8 +1551,21 @@ BEGIN
         );
     END IF;
 
+    -- Check for high-risk geographic locations
+    IF EXISTS (
+        SELECT 1 FROM high_risk_countries
+        WHERE country_code = p_location_data->>'country'
+    ) THEN
+        v_geographic_risk := v_geographic_risk + 40;
+        v_risk_factors := v_risk_factors || json_build_object(
+            'factor', 'high_risk_country',
+            'score', 40,
+            'details', 'Transaction from high-risk jurisdiction'
+        );
+    END IF;
+
     -- Behavioral risk assessment
-    IF p_amount > 5000 THEN
+    IF p_amount > (v_customer_profile->>'typical_transaction_amount')::DECIMAL * 5 THEN
         v_behavioral_risk := v_behavioral_risk + 30;
         v_risk_factors := v_risk_factors || json_build_object(
             'factor', 'unusual_amount',
@@ -771,8 +1574,44 @@ BEGIN
         );
     END IF;
 
+    -- Velocity risk
+    IF (v_velocity_check->>'transactions_today')::INTEGER > 10 THEN
+        v_behavioral_risk := v_behavioral_risk + 20;
+        v_risk_factors := v_risk_factors || json_build_object(
+            'factor', 'high_velocity',
+            'score', 20,
+            'details', 'Unusually high transaction frequency'
+        );
+    END IF;
+
+    -- Time-based risk (late night transactions)
+    IF EXTRACT(HOUR FROM NOW()) BETWEEN 2 AND 5 THEN
+        v_behavioral_risk := v_behavioral_risk + 15;
+        v_risk_factors := v_risk_factors || json_build_object(
+            'factor', 'unusual_time',
+            'score', 15,
+            'details', 'Transaction during unusual hours'
+        );
+    END IF;
+
+    -- Amount-based risk
+    CASE
+        WHEN p_amount >= 50000 THEN v_amount_risk := 35;
+        WHEN p_amount >= 10000 THEN v_amount_risk := 25;
+        WHEN p_amount >= 5000 THEN v_amount_risk := 15;
+        WHEN p_amount >= 1000 THEN v_amount_risk := 5;
+        ELSE v_amount_risk := 0;
+    END CASE;
+
     -- Calculate total risk score
     v_risk_score := v_geographic_risk + v_behavioral_risk + v_amount_risk;
+
+    -- Add customer risk profile adjustment
+    CASE v_customer_profile->>'risk_profile'
+        WHEN 'high' THEN v_risk_score := v_risk_score + 20;
+        WHEN 'medium' THEN v_risk_score := v_risk_score + 10;
+        ELSE v_risk_score := v_risk_score + 0;
+    END CASE;
 
     -- Determine final decision
     CASE
@@ -782,15 +1621,188 @@ BEGIN
         ELSE v_final_decision := 'APPROVE';
     END CASE;
 
+    -- Log risk assessment
+    INSERT INTO transaction_risk_assessments (
+        account_id, risk_score, risk_factors, decision, assessment_date
+    ) VALUES (
+        p_account_id, v_risk_score, v_risk_factors, v_final_decision, NOW()
+    );
+
     RETURN json_build_object(
         'risk_score', v_risk_score,
         'decision', v_final_decision,
         'risk_factors', v_risk_factors,
+        'customer_profile', v_customer_profile,
+        'velocity_check', v_velocity_check,
         'assessment_timestamp', NOW()
     );
 
 END;
 $$ LANGUAGE plpgsql;
+```
+
+### C.3 Healthcare Information System Case Study
+
+**📍 Location: SECTION C - C.3 Healthcare Information Management System Case Study**
+
+#### HIPAA-Compliant Patient Data Access
+
+```sql
+-- Patient data access with comprehensive privacy controls
+CREATE SCHEMA healthcare_secure;
+SET search_path TO healthcare_secure;
+
+-- Physician view - treatment-focused access
+CREATE VIEW physician_patient_care AS
+SELECT
+    p.patient_id,
+    p.medical_record_number,
+
+    -- Patient demographics (limited based on treatment relationship)
+    CASE
+        WHEN EXISTS (
+            SELECT 1 FROM physician_patient_assignments ppa
+            WHERE ppa.patient_id = p.patient_id
+              AND ppa.physician_id = get_current_physician_id()
+              AND ppa.status = 'active'
+        ) THEN p.first_name
+        ELSE 'RESTRICTED'
+    END as first_name,
+
+    CASE
+        WHEN EXISTS (
+            SELECT 1 FROM physician_patient_assignments ppa
+            WHERE ppa.patient_id = p.patient_id
+              AND ppa.physician_id = get_current_physician_id()
+              AND ppa.status = 'active'
+        ) THEN p.last_name
+        ELSE 'RESTRICTED'
+    END as last_name,
+
+    p.date_of_birth,
+    p.gender,
+    p.blood_type,
+
+    -- Clinical information
+    p.allergies,
+    p.chronic_conditions,
+    p.current_medications,
+    p.emergency_contact,
+
+    -- Recent encounters
+    (SELECT json_agg(json_build_object(
+        'encounter_id', e.encounter_id,
+        'encounter_date', e.encounter_date,
+        'encounter_type', e.encounter_type,
+        'chief_complaint', e.chief_complaint,
+        'diagnosis_codes', e.diagnosis_codes,
+        'treatment_notes', CASE
+            WHEN e.attending_physician_id = get_current_physician_id()
+            THEN e.treatment_notes
+            ELSE 'Access restricted to attending physician'
+        END
+    ) ORDER BY e.encounter_date DESC)
+     FROM patient_encounters e
+     WHERE e.patient_id = p.patient_id
+       AND e.encounter_date >= CURRENT_DATE - INTERVAL '1 year'
+     LIMIT 20
+    ) as recent_encounters,
+
+    -- Lab results (time-restricted)
+    (SELECT json_agg(json_build_object(
+        'test_date', lr.test_date,
+        'test_type', lr.test_type,
+        'result_value', lr.result_value,
+        'reference_range', lr.reference_range,
+        'abnormal_flag', lr.abnormal_flag
+    ) ORDER BY lr.test_date DESC)
+     FROM lab_results lr
+     WHERE lr.patient_id = p.patient_id
+       AND lr.test_date >= CURRENT_DATE - INTERVAL '2 years'
+       AND lr.result_status = 'final'
+    ) as lab_results,
+
+    -- Medication history
+    (SELECT json_agg(json_build_object(
+        'medication_name', m.medication_name,
+        'dosage', m.dosage,
+        'frequency', m.frequency,
+        'start_date', m.start_date,
+        'end_date', m.end_date,
+        'prescribing_physician', ph.first_name || ' ' || ph.last_name
+    ) ORDER BY m.start_date DESC)
+     FROM patient_medications m
+     INNER JOIN physicians ph ON m.prescribing_physician_id = ph.physician_id
+     WHERE m.patient_id = p.patient_id
+       AND (m.end_date IS NULL OR m.end_date >= CURRENT_DATE - INTERVAL '1 year')
+    ) as medication_history
+
+FROM patients p
+WHERE p.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM physician_patient_assignments ppa
+      WHERE ppa.patient_id = p.patient_id
+        AND ppa.physician_id = get_current_physician_id()
+        AND ppa.status = 'active'
+  )
+WITH CHECK OPTION;
+
+-- Research data view - de-identified for studies
+CREATE VIEW research_patient_cohort AS
+SELECT
+    -- De-identified patient identifier
+    SHA256(CONCAT(patient_id::text, 'research_salt_2024'))::varchar as research_id,
+
+    -- Demographic data (aggregated/de-identified)
+    CASE
+        WHEN EXTRACT(YEAR FROM age(date_of_birth)) BETWEEN 0 AND 17 THEN '0-17'
+        WHEN EXTRACT(YEAR FROM age(date_of_birth)) BETWEEN 18 AND 34 THEN '18-34'
+        WHEN EXTRACT(YEAR FROM age(date_of_birth)) BETWEEN 35 AND 54 THEN '35-54'
+        WHEN EXTRACT(YEAR FROM age(date_of_birth)) BETWEEN 55 AND 74 THEN '55-74'
+        ELSE '75+'
+    END as age_group,
+
+    gender,
+    LEFT(postal_code, 3) as postal_area,  -- Geographic region only
+
+    -- Clinical indicators (for research)
+    chronic_conditions,
+    primary_diagnosis_category,
+
+    -- Aggregated utilization metrics
+    (SELECT COUNT(*) FROM patient_encounters
+     WHERE patient_id = p.patient_id
+       AND encounter_date >= CURRENT_DATE - INTERVAL '1 year'
+    ) as encounters_last_year,
+
+    (SELECT COUNT(DISTINCT diagnosis_primary) FROM patient_encounters
+     WHERE patient_id = p.patient_id
+       AND encounter_date >= CURRENT_DATE - INTERVAL '2 years'
+    ) as unique_diagnoses_2_years,
+
+    -- Outcome measures (de-identified)
+    CASE
+        WHEN EXISTS (
+            SELECT 1 FROM patient_encounters
+            WHERE patient_id = p.patient_id
+              AND encounter_type = 'emergency'
+              AND encounter_date >= CURRENT_DATE - INTERVAL '30 days'
+        ) THEN 'Y'
+        ELSE 'N'
+    END as recent_emergency_visit,
+
+    -- Remove all direct identifiers
+    NULL as first_name,
+    NULL as last_name,
+    NULL as ssn,
+    NULL as phone,
+    NULL as email,
+    NULL as address
+
+FROM patients p
+WHERE p.consent_for_research = TRUE
+  AND p.status = 'active'
+  AND CURRENT_USER IN (SELECT username FROM approved_researchers);
 ```
 
 ---
@@ -829,6 +1841,30 @@ CREATE TABLE sales_data_2024 (
     PARTITION sales_q3_2024 VALUES LESS THAN (TO_DATE('2024-10-01', 'YYYY-MM-DD')),
     PARTITION sales_q4_2024 VALUES LESS THAN (TO_DATE('2025-01-01', 'YYYY-MM-DD'))
 );
+
+-- Materialized view for complex aggregations
+CREATE MATERIALIZED VIEW monthly_sales_summary AS
+SELECT
+    DATE_TRUNC('month', sale_date) as sales_month,
+    product_category,
+    SUM(amount) as total_sales,
+    COUNT(*) as transaction_count,
+    AVG(amount) as avg_transaction_value
+FROM sales_data_2024 s
+INNER JOIN products p ON s.product_id = p.product_id
+GROUP BY DATE_TRUNC('month', sale_date), product_category;
+
+-- Automatic refresh schedule
+CREATE OR REPLACE PROCEDURE refresh_sales_summary
+AS
+BEGIN
+    EXECUTE IMMEDIATE 'REFRESH MATERIALIZED VIEW monthly_sales_summary';
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END;
 ```
 
 ### D.2 Security Implementation
@@ -896,6 +1932,401 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER audit_customers
     AFTER INSERT OR UPDATE OR DELETE ON customers
     FOR EACH ROW EXECUTE FUNCTION audit_data_changes();
+```
+
+### D.3 AI/ML Integration with Database Languages
+
+**📍 Location: SECTION D - D.2 Emerging Technology Integration**
+
+#### In-Database Machine Learning
+
+```sql
+-- In-database machine learning (PostgreSQL with ML extensions)
+-- Customer churn prediction model
+CREATE MODEL customer_churn_model
+USING logistic_regression
+AS SELECT
+    customer_age,
+    total_orders,
+    avg_order_value,
+    days_since_last_order,
+    customer_service_contacts,
+    (CASE WHEN last_order_date < CURRENT_DATE - INTERVAL '6 months'
+          THEN 1 ELSE 0 END) as churned
+FROM customer_analytics_mv
+WHERE registration_date < CURRENT_DATE - INTERVAL '1 year';
+
+-- Apply ML model in real-time queries
+SELECT
+    customer_id,
+    customer_name,
+    PREDICT(customer_churn_model,
+        customer_age, total_orders, avg_order_value,
+        days_since_last_order, customer_service_contacts
+    ) as churn_probability
+FROM customer_current_metrics
+WHERE churn_probability > 0.7
+ORDER BY churn_probability DESC;
+```
+
+#### Multi-Model Database Support
+
+```sql
+-- Multi-model database support example (PostgreSQL)
+-- JSON document storage with relational integration
+SELECT
+    customer_id,
+    customer_data->>'name' as customer_name,
+    (customer_data->'preferences'->>'categories')::text[] as preferred_categories,
+
+    -- Graph traversal for customer network
+    WITH RECURSIVE customer_network AS (
+        SELECT customer_id, referrer_id, 1 as level
+        FROM customer_referrals
+        WHERE customer_id = 12345
+
+        UNION ALL
+
+        SELECT cr.customer_id, cr.referrer_id, cn.level + 1
+        FROM customer_referrals cr
+        INNER JOIN customer_network cn ON cr.referrer_id = cn.customer_id
+        WHERE cn.level < 5
+    )
+    SELECT COUNT(*) FROM customer_network
+
+FROM customers
+WHERE customer_data @> '{"status": "active"}'
+  AND customer_data->'location'->>'country' = 'USA';
+```
+
+#### Cloud-Native Database Patterns
+
+```sql
+-- Multi-region data distribution
+CREATE TABLE global_customers (
+    customer_id BIGINT PRIMARY KEY,
+    region VARCHAR(20) NOT NULL,
+    customer_data JSONB
+) PARTITION BY LIST (region);
+
+-- Regional partitions for data locality
+CREATE TABLE customers_us PARTITION OF global_customers
+    FOR VALUES IN ('us-east', 'us-west')
+    TABLESPACE us_storage;
+
+CREATE TABLE customers_eu PARTITION OF global_customers
+    FOR VALUES IN ('eu-west', 'eu-central')
+    TABLESPACE eu_storage;
+
+-- Cross-region replication setup
+CREATE PUBLICATION global_customer_updates FOR TABLE global_customers;
+-- Subscription setup on replica regions
+CREATE SUBSCRIPTION eu_replica
+    CONNECTION 'host=us-primary.db port=5432 dbname=production'
+    PUBLICATION global_customer_updates;
+```
+
+#### Quantum-Safe Security Implementation
+
+```sql
+-- Future quantum-safe encryption implementation
+CREATE TABLE sensitive_customer_data (
+    customer_id BIGINT PRIMARY KEY,
+    encrypted_pii BYTEA,
+    quantum_safe_hash VARCHAR(512),
+    encryption_algorithm VARCHAR(50) DEFAULT 'CRYSTALS-KYBER-1024',
+    key_rotation_date TIMESTAMP DEFAULT NOW(),
+
+    -- Post-quantum digital signature
+    quantum_signature BYTEA,
+    signature_algorithm VARCHAR(50) DEFAULT 'DILITHIUM-3'
+);
+
+-- Function for quantum-safe data encryption
+CREATE OR REPLACE FUNCTION encrypt_with_pqc(
+    p_data TEXT,
+    p_algorithm VARCHAR(50) DEFAULT 'CRYSTALS-KYBER-1024'
+) RETURNS BYTEA AS $$
+BEGIN
+    -- Implementation would use post-quantum cryptography library
+    -- This is a conceptual example
+    RETURN pgp_sym_encrypt(p_data, current_setting('app.quantum_key'), p_algorithm);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+---
+
+## 6. ADVANCED EXAMPLES AND EDGE CASES
+
+### 6.1 Complex Transaction Management
+
+**📍 Location: SECTION A - A.3 Data Manipulation Language (DML) - Advanced Examples**
+
+#### Multi-Step Transaction with Savepoints
+
+```sql
+-- Complex multi-step transaction with savepoints
+BEGIN TRANSACTION;
+
+-- Savepoint for customer creation
+SAVEPOINT customer_creation;
+
+-- Step 1: Create customer
+INSERT INTO customers (first_name, last_name, email, phone)
+VALUES ('John', 'Doe', 'john.doe@email.com', '+1-555-0123');
+
+SET @customer_id = LAST_INSERT_ID();
+
+-- Step 2: Create primary account
+SAVEPOINT account_creation;
+
+INSERT INTO accounts (customer_id, account_type_id, account_name, initial_deposit)
+VALUES (@customer_id, 1, 'Primary Checking', 1000.00);
+
+SET @account_id = LAST_INSERT_ID();
+
+-- Step 3: Setup automatic transfers (could fail)
+SAVEPOINT auto_transfer_setup;
+
+BEGIN
+    INSERT INTO recurring_transfers (
+        from_account_id, to_account_id, amount, frequency, start_date
+    ) VALUES (
+        @account_id,
+        (SELECT account_id FROM system_accounts WHERE account_type = 'savings_auto'),
+        100.00,
+        'monthly',
+        DATE_ADD(CURRENT_DATE, INTERVAL 1 MONTH)
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        -- If auto-transfer fails, rollback just this part
+        ROLLBACK TO auto_transfer_setup;
+
+        INSERT INTO customer_notes (customer_id, note_type, note_text, created_at)
+        VALUES (@customer_id, 'setup_warning', 'Auto-transfer setup failed - manual setup required', NOW());
+END;
+
+-- Step 4: Send welcome email (external system call)
+-- If this fails, we don't want to rollback the entire account creation
+SAVEPOINT welcome_email;
+
+BEGIN
+    CALL send_welcome_email(@customer_id);
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK TO welcome_email;
+
+        INSERT INTO pending_communications (customer_id, communication_type, priority, created_at)
+        VALUES (@customer_id, 'welcome_email', 'high', NOW());
+END;
+
+-- Final validation before commit
+IF (SELECT COUNT(*) FROM customers WHERE customer_id = @customer_id) = 1
+   AND (SELECT COUNT(*) FROM accounts WHERE customer_id = @customer_id) >= 1 THEN
+    COMMIT;
+    SELECT @customer_id as new_customer_id, 'Account created successfully' as status;
+ELSE
+    ROLLBACK;
+    SELECT NULL as new_customer_id, 'Account creation failed' as status;
+END IF;
+```
+
+#### Batch Processing with Error Handling
+
+```sql
+-- Batch processing with comprehensive error handling
+DELIMITER //
+
+CREATE PROCEDURE process_monthly_statements(
+    IN p_process_date DATE,
+    OUT p_success_count INT,
+    OUT p_error_count INT,
+    OUT p_error_details TEXT
+)
+BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE v_customer_id BIGINT;
+    DECLARE v_account_id BIGINT;
+    DECLARE v_error_msg TEXT DEFAULT '';
+    DECLARE v_current_balance DECIMAL(15,2);
+
+    -- Cursor for active accounts
+    DECLARE account_cursor CURSOR FOR
+        SELECT c.customer_id, a.account_id, a.current_balance
+        FROM customers c
+        INNER JOIN accounts a ON c.customer_id = a.customer_id
+        WHERE c.status = 'active'
+          AND a.status = 'active'
+          AND a.account_type_id IN (1, 2, 3); -- Checking, Savings, Money Market
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    -- Initialize counters
+    SET p_success_count = 0;
+    SET p_error_count = 0;
+    SET p_error_details = '';
+
+    -- Create temporary table for batch processing results
+    CREATE TEMPORARY TABLE temp_statement_results (
+        customer_id BIGINT,
+        account_id BIGINT,
+        status VARCHAR(50),
+        error_message TEXT,
+        processing_time TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Open cursor and process each account
+    OPEN account_cursor;
+
+    read_loop: LOOP
+        FETCH account_cursor INTO v_customer_id, v_account_id, v_current_balance;
+
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+
+        BEGIN
+            -- Nested transaction for each statement
+            DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+            BEGIN
+                GET DIAGNOSTICS CONDITION 1 v_error_msg = MESSAGE_TEXT;
+
+                INSERT INTO temp_statement_results
+                VALUES (v_customer_id, v_account_id, 'ERROR', v_error_msg, NOW());
+
+                SET p_error_count = p_error_count + 1;
+                SET p_error_details = CONCAT(p_error_details,
+                    'Account ', v_account_id, ': ', v_error_msg, '; ');
+
+                -- Log error but continue processing
+                INSERT INTO processing_errors (
+                    process_type, reference_id, error_message, error_date
+                ) VALUES (
+                    'monthly_statement', v_account_id, v_error_msg, NOW()
+                );
+            END;
+
+            -- Generate statement for this account
+            INSERT INTO monthly_statements (
+                customer_id,
+                account_id,
+                statement_date,
+                opening_balance,
+                closing_balance,
+                total_debits,
+                total_credits,
+                interest_earned,
+                fees_charged,
+                statement_period_start,
+                statement_period_end
+            )
+            SELECT
+                v_customer_id,
+                v_account_id,
+                p_process_date,
+
+                -- Opening balance (last day of previous month)
+                COALESCE((
+                    SELECT balance
+                    FROM daily_balances
+                    WHERE account_id = v_account_id
+                      AND balance_date = LAST_DAY(DATE_SUB(p_process_date, INTERVAL 1 MONTH))
+                ), 0),
+
+                v_current_balance, -- Closing balance
+
+                -- Total debits for the month
+                COALESCE((
+                    SELECT SUM(ABS(amount))
+                    FROM transactions
+                    WHERE account_id = v_account_id
+                      AND amount < 0
+                      AND DATE(transaction_date) BETWEEN
+                          DATE_FORMAT(p_process_date, '%Y-%m-01')
+                          AND LAST_DAY(p_process_date)
+                ), 0),
+
+                -- Total credits for the month
+                COALESCE((
+                    SELECT SUM(amount)
+                    FROM transactions
+                    WHERE account_id = v_account_id
+                      AND amount > 0
+                      AND DATE(transaction_date) BETWEEN
+                          DATE_FORMAT(p_process_date, '%Y-%m-01')
+                          AND LAST_DAY(p_process_date)
+                ), 0),
+
+                -- Interest earned (calculated)
+                COALESCE((
+                    SELECT SUM(interest_amount)
+                    FROM interest_calculations
+                    WHERE account_id = v_account_id
+                      AND calculation_date BETWEEN
+                          DATE_FORMAT(p_process_date, '%Y-%m-01')
+                          AND LAST_DAY(p_process_date)
+                ), 0),
+
+                -- Fees charged
+                COALESCE((
+                    SELECT SUM(fee_amount)
+                    FROM account_fees
+                    WHERE account_id = v_account_id
+                      AND fee_date BETWEEN
+                          DATE_FORMAT(p_process_date, '%Y-%m-01')
+                          AND LAST_DAY(p_process_date)
+                ), 0),
+
+                DATE_FORMAT(p_process_date, '%Y-%m-01'), -- Period start
+                LAST_DAY(p_process_date) -- Period end
+            ;
+
+            -- Mark as successful
+            INSERT INTO temp_statement_results
+            VALUES (v_customer_id, v_account_id, 'SUCCESS', NULL, NOW());
+
+            SET p_success_count = p_success_count + 1;
+
+        END;
+
+    END LOOP;
+
+    CLOSE account_cursor;
+
+    -- Generate summary report
+    INSERT INTO batch_processing_summary (
+        process_type,
+        process_date,
+        total_records,
+        success_count,
+        error_count,
+        processing_duration,
+        created_at
+    ) VALUES (
+        'monthly_statements',
+        p_process_date,
+        p_success_count + p_error_count,
+        p_success_count,
+        p_error_count,
+        TIMESTAMPDIFF(SECOND,
+            (SELECT MIN(processing_time) FROM temp_statement_results),
+            (SELECT MAX(processing_time) FROM temp_statement_results)
+        ),
+        NOW()
+    );
+
+    -- Cleanup
+    DROP TEMPORARY TABLE temp_statement_results;
+
+END//
+
+DELIMITER ;
+
+-- Usage example
+CALL process_monthly_statements('2024-01-31', @success, @errors, @error_details);
+SELECT @success as successful_statements, @errors as failed_statements, @error_details as error_summary;
 ```
 
 ---
